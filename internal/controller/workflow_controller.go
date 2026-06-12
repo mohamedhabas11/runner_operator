@@ -261,8 +261,8 @@ func evaluateStep(step runnersv1alpha1.WorkflowStep, stepStatusMap map[string]ru
 
 	allDepSucceeded := true
 	for _, dep := range step.DependsOn {
-		status := stepStatusMap[dep]
-		if status.Phase != runnersv1alpha1.StepPhaseSucceeded {
+		status, ok := stepStatusMap[dep]
+		if !ok || status.Phase != runnersv1alpha1.StepPhaseSucceeded {
 			allDepSucceeded = false
 			break
 		}
@@ -318,7 +318,8 @@ func (r *WorkflowReconciler) buildStepRunner(ctx context.Context, wf *runnersv1a
 		spec.Image = step.Image
 	} else if step.RunnerRef != nil {
 		template := &runnersv1alpha1.Runner{}
-		if err := r.Get(ctx, types.NamespacedName{Name: step.RunnerRef.Name, Namespace: wf.Namespace}, template); err == nil {
+		var err error
+		if err = r.Get(ctx, types.NamespacedName{Name: step.RunnerRef.Name, Namespace: wf.Namespace}, template); err == nil {
 			spec = *template.Spec.DeepCopy()
 			if step.Command != nil {
 				spec.Command = step.Command

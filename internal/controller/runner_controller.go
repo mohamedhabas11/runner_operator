@@ -251,10 +251,10 @@ func buildGitCloneScript(gitRepo *runnersv1alpha1.GitRepo) string {
 
 	if gitRepo.Auth != nil && gitRepo.Auth.SecretRef != nil {
 		script += `if [ -f /etc/git-auth/ssh-privatekey ]; then
-  mkdir -p ~/.ssh
-  cp /etc/git-auth/ssh-privatekey ~/.ssh/id_rsa
-  chmod 600 ~/.ssh/id_rsa
-  ssh-keyscan github.com gitlab.com bitbucket.org >> ~/.ssh/known_hosts 2>/dev/null || true
+   mkdir -p ~/.ssh
+   cp /etc/git-auth/ssh-privatekey ~/.ssh/id_rsa
+   chmod 600 ~/.ssh/id_rsa
+   ssh-keyscan github.com gitlab.com bitbucket.org >> ~/.ssh/known_hosts 2>/dev/null || true
 fi
 `
 	}
