@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -19,8 +20,6 @@ import (
 
 	runnersv1alpha1 "github.com/mohamedhabas11/runner_operator/api/v1alpha1"
 )
-
-const RunnerFinalizer = "runners.runner-operator.io/finalizer"
 
 // RunnerReconciler reconciles a Runner object.
 type RunnerReconciler struct {
@@ -30,7 +29,6 @@ type RunnerReconciler struct {
 
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=runners,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=runners/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=runners.runner-operator.io,resources=runners/finalizers,verbs=update
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=batch,resources=jobs/status,verbs=get
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
@@ -44,15 +42,7 @@ func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	if !runner.DeletionTimestamp.IsZero() {
-		return r.reconcileDelete(ctx, runner)
-	}
-
-	if !controllerutil.ContainsFinalizer(runner, RunnerFinalizer) {
-		logger.Info("Adding finalizer")
-		controllerutil.AddFinalizer(runner, RunnerFinalizer)
-		if err := r.Update(ctx, runner); err != nil {
-			return ctrl.Result{}, err
-		}
+		logger.Info("Runner is being deleted, relying on OwnerReferences for cleanup")
 		return ctrl.Result{}, nil
 	}
 
@@ -76,9 +66,10 @@ func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			return ctrl.Result{}, err
 		}
 
+		patchBase := client.MergeFrom(runner.DeepCopy())
 		runner.Status.Phase = runnersv1alpha1.RunnerPhasePending
 		runner.Status.ResourceHash = specHash
-		if err := r.Status().Update(ctx, runner); err != nil {
+		if err := r.Status().Patch(ctx, runner, patchBase); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
@@ -88,40 +79,18 @@ func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	if runner.Status.ResourceHash != specHash {
+		if existingJob.Status.StartTime != nil && existingJob.Status.CompletionTime == nil {
+			logger.Info("Spec drift detected but Job is running, deferring update")
+			return ctrl.Result{}, nil
+		}
 		logger.Info("Spec drift detected, deleting and recreating Job")
 		if err := r.Delete(ctx, existingJob); err != nil {
-			return ctrl.Result{}, err
-		}
-		if err := r.Status().Update(ctx, runner); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
 	}
 
 	return r.updateStatusFromJob(ctx, runner, existingJob)
-}
-
-func (r *RunnerReconciler) reconcileDelete(ctx context.Context, runner *runnersv1alpha1.Runner) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-
-	if !controllerutil.ContainsFinalizer(runner, RunnerFinalizer) {
-		return ctrl.Result{}, nil
-	}
-
-	jobName := runner.Name + "-job"
-	job := &batchv1.Job{}
-	if err := r.Get(ctx, types.NamespacedName{Name: jobName, Namespace: runner.Namespace}, job); err == nil {
-		logger.Info("Cleaning up Job", "job", jobName)
-		if err := r.Delete(ctx, job); err != nil && !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, err
-		}
-	}
-
-	controllerutil.RemoveFinalizer(runner, RunnerFinalizer)
-	if err := r.Update(ctx, runner); err != nil {
-		return ctrl.Result{}, err
-	}
-	return ctrl.Result{}, nil
 }
 
 func (r *RunnerReconciler) buildJob(runner *runnersv1alpha1.Runner, jobName, specHash string) *batchv1.Job {
@@ -149,20 +118,34 @@ func (r *RunnerReconciler) buildJob(runner *runnersv1alpha1.Runner, jobName, spe
 				},
 				Spec: corev1.PodSpec{
 					RestartPolicy: corev1.RestartPolicyNever,
+					SecurityContext: &corev1.PodSecurityContext{
+						RunAsNonRoot: ptr.To(true),
+						SeccompProfile: &corev1.SeccompProfile{
+							Type: corev1.SeccompProfileTypeRuntimeDefault,
+						},
+					},
 					Containers: []corev1.Container{
 						{
-							Name:    "runner",
-							Image:   runner.Spec.Image,
-							Env:     runner.Spec.Env,
-							EnvFrom: runner.Spec.EnvFrom,
-							Args:    runner.Spec.Args,
-							Command: runner.Spec.Command,
+							Name:      "runner",
+							Image:     runner.Spec.Image,
+							Env:       runner.Spec.Env,
+							EnvFrom:   runner.Spec.EnvFrom,
+							Args:      runner.Spec.Args,
+							Command:   runner.Spec.Command,
+							Resources: runner.Spec.Resources,
 							VolumeMounts: func() []corev1.VolumeMount {
 								if len(runner.Spec.Mounts) > 0 {
 									return runner.Spec.Mounts
 								}
 								return nil
 							}(),
+							SecurityContext: &corev1.SecurityContext{
+								AllowPrivilegeEscalation: ptr.To(false),
+								ReadOnlyRootFilesystem:   ptr.To(true),
+								Capabilities: &corev1.Capabilities{
+									Drop: []corev1.Capability{"ALL"},
+								},
+							},
 						},
 					},
 					Volumes: func() []corev1.Volume {
@@ -215,19 +198,23 @@ func (r *RunnerReconciler) updateStatusFromJob(ctx context.Context, runner *runn
 		}
 	}
 
-	if runner.Status.Phase != phase {
-		logger.Info("Runner phase changed", "phase", phase)
-		runner.Status.Phase = phase
+	if runner.Status.Phase == phase &&
+		metav1TimePtrEqual(runner.Status.StartTime, startTime) &&
+		metav1TimePtrEqual(runner.Status.CompletionTime, completionTime) {
+		return ctrl.Result{}, nil
 	}
 
+	patchBase := client.MergeFrom(runner.DeepCopy())
+	runner.Status.Phase = phase
 	if startTime != nil {
 		runner.Status.StartTime = startTime
 	}
 	if completionTime != nil {
 		runner.Status.CompletionTime = completionTime
 	}
+	logger.Info("Runner phase changed", "phase", phase)
 
-	if err := r.Status().Update(ctx, runner); err != nil {
+	if err := r.Status().Patch(ctx, runner, patchBase); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
@@ -249,4 +236,14 @@ func computeSpecHash(spec any) (string, error) {
 	}
 	hash := sha256.Sum256(data)
 	return fmt.Sprintf("%x", hash[:8]), nil
+}
+
+func metav1TimePtrEqual(a, b *metav1.Time) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return a.Time.Equal(b.Time)
 }

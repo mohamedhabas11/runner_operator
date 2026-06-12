@@ -46,13 +46,6 @@ rules:
 - apiGroups:
   - runners.runner-operator.io
   resources:
-  - runners/finalizers
-  - workflows/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - runners.runner-operator.io
-  resources:
   - runners/status
   - workflows/status
   verbs:

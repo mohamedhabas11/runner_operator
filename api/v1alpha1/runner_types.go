@@ -50,6 +50,10 @@ type RunnerSpec struct {
 	// Must be a valid Go duration string (e.g. "30m", "1h").
 	// +optional
 	TimeoutAfter *metav1.Duration `json:"timeoutAfter,omitempty"`
+
+	// Resources defines CPU and memory limits/requests for the runner container.
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
 // RunnerStatus defines the observed state of Runner.

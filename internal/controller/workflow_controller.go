@@ -4,11 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -16,8 +15,6 @@ import (
 
 	runnersv1alpha1 "github.com/mohamedhabas11/runner_operator/api/v1alpha1"
 )
-
-const WorkflowFinalizer = "workflows.runner-operator.io/finalizer"
 
 // WorkflowReconciler reconciles a Workflow object.
 type WorkflowReconciler struct {
@@ -27,7 +24,6 @@ type WorkflowReconciler struct {
 
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=workflows,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=workflows/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=runners.runner-operator.io,resources=workflows/finalizers,verbs=update
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=runners,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=runners/status,verbs=get
 
@@ -40,15 +36,7 @@ func (r *WorkflowReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	if !wf.DeletionTimestamp.IsZero() {
-		return r.reconcileDelete(ctx, wf)
-	}
-
-	if !controllerutil.ContainsFinalizer(wf, WorkflowFinalizer) {
-		logger.Info("Adding finalizer")
-		controllerutil.AddFinalizer(wf, WorkflowFinalizer)
-		if err := r.Update(ctx, wf); err != nil {
-			return ctrl.Result{}, err
-		}
+		logger.Info("Workflow is being deleted, relying on OwnerReferences for cleanup")
 		return ctrl.Result{}, nil
 	}
 
@@ -66,50 +54,27 @@ func (r *WorkflowReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if wf.Status.StartTime == nil {
 		now := metav1.Now()
 		wf.Status.StartTime = &now
+		updated = true
 	}
 
-	wf.Status.Phase = computeWorkflowPhase(wf)
+	newPhase := computeWorkflowPhase(wf)
+	if newPhase != wf.Status.Phase {
+		wf.Status.Phase = newPhase
+		updated = true
+	}
 	if isWorkflowTerminal(wf.Status.Phase) && wf.Status.CompletionTime == nil {
 		now := metav1.Now()
 		wf.Status.CompletionTime = &now
+		updated = true
 	}
 
 	if updated {
-		if err := r.Status().Update(ctx, wf); err != nil {
+		patchBase := client.MergeFrom(wf.DeepCopy())
+		if err := r.Status().Patch(ctx, wf, patchBase); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
 
-	if isWorkflowTerminal(wf.Status.Phase) {
-		return ctrl.Result{}, nil
-	}
-
-	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-}
-
-func (r *WorkflowReconciler) reconcileDelete(ctx context.Context, wf *runnersv1alpha1.Workflow) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-
-	if !controllerutil.ContainsFinalizer(wf, WorkflowFinalizer) {
-		return ctrl.Result{}, nil
-	}
-
-	runners, err := r.listStepRunners(ctx, wf)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
-	for i := range runners {
-		logger.Info("Cleaning up Runner", "runner", runners[i].Name)
-		if err := r.Delete(ctx, &runners[i]); err != nil && !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, err
-		}
-	}
-
-	controllerutil.RemoveFinalizer(wf, WorkflowFinalizer)
-	if err := r.Update(ctx, wf); err != nil {
-		return ctrl.Result{}, err
-	}
 	return ctrl.Result{}, nil
 }
 
@@ -169,7 +134,7 @@ func (r *WorkflowReconciler) reconcileSteps(ctx context.Context, wf *runnersv1al
 
 		case stepRun:
 			if !hasRunner {
-				runner := r.buildStepRunner(wf, &step)
+				runner := r.buildStepRunner(ctx, wf, &step)
 				if err := controllerutil.SetControllerReference(wf, runner, r.Scheme); err != nil {
 					logger.Error(err, "Failed to set owner reference", "step", step.Name)
 					continue
@@ -186,8 +151,24 @@ func (r *WorkflowReconciler) reconcileSteps(ctx context.Context, wf *runnersv1al
 				})
 				updated = true
 			} else {
-				stepPhase := runnerPhaseToStepPhase(existing.Status.Phase, step, status)
-				if !hasStatus || status.Phase != stepPhase {
+				stepPhase := runnerPhaseToStepPhase(existing.Status.Phase)
+				if stepPhase == runnersv1alpha1.StepPhaseFailed &&
+					step.Retry != nil && step.Retry.MaxRetries > 0 &&
+					status.RetryCount < step.Retry.MaxRetries {
+					logger.Info("Step failed, retrying", "step", step.Name, "attempt", status.RetryCount+1)
+					if err := r.Delete(ctx, &existing); err != nil {
+						logger.Error(err, "Failed to delete failed Runner for retry", "step", step.Name)
+					}
+					stepPhase = runnersv1alpha1.StepPhaseRunning
+					upsertStepStatus(wf, step.Name, stepPhase)
+					for i, s := range wf.Status.StepStatuses {
+						if s.Name == step.Name {
+							wf.Status.StepStatuses[i].RetryCount++
+							break
+						}
+					}
+					updated = true
+				} else if !hasStatus || status.Phase != stepPhase {
 					upsertStepStatus(wf, step.Name, stepPhase)
 					updated = true
 				}
@@ -246,7 +227,7 @@ func evaluateStep(step runnersv1alpha1.WorkflowStep, stepStatusMap map[string]ru
 	}
 }
 
-func (r *WorkflowReconciler) buildStepRunner(wf *runnersv1alpha1.Workflow, step *runnersv1alpha1.WorkflowStep) *runnersv1alpha1.Runner {
+func (r *WorkflowReconciler) buildStepRunner(ctx context.Context, wf *runnersv1alpha1.Workflow, step *runnersv1alpha1.WorkflowStep) *runnersv1alpha1.Runner {
 	runnerName := fmt.Sprintf("%s-%s", wf.Name, step.Name)
 
 	spec := runnersv1alpha1.RunnerSpec{
@@ -258,13 +239,26 @@ func (r *WorkflowReconciler) buildStepRunner(wf *runnersv1alpha1.Workflow, step 
 	if step.Image != "" {
 		spec.Image = step.Image
 	} else if step.RunnerRef != nil {
-		spec.Image = step.RunnerRef.Name
+		template := &runnersv1alpha1.Runner{}
+		if err := r.Get(ctx, types.NamespacedName{Name: step.RunnerRef.Name, Namespace: wf.Namespace}, template); err == nil {
+			spec = *template.Spec.DeepCopy()
+			if step.Command != nil {
+				spec.Command = step.Command
+			}
+			if step.Args != nil {
+				spec.Args = step.Args
+			}
+			if step.Env != nil {
+				spec.Env = step.Env
+			}
+			if step.Timeout != nil {
+				spec.TimeoutAfter = step.Timeout
+			}
+		} else {
+			spec.Image = step.RunnerRef.Name
+		}
 	} else {
 		spec.Image = "busybox:latest"
-	}
-
-	if step.Timeout != nil {
-		spec.TimeoutAfter = step.Timeout
 	}
 
 	return &runnersv1alpha1.Runner{
@@ -299,7 +293,7 @@ func buildRunnerMap(runners []runnersv1alpha1.Runner) map[string]runnersv1alpha1
 	return m
 }
 
-func runnerPhaseToStepPhase(rp runnersv1alpha1.RunnerPhase, step runnersv1alpha1.WorkflowStep, status runnersv1alpha1.StepStatus) runnersv1alpha1.StepPhase {
+func runnerPhaseToStepPhase(rp runnersv1alpha1.RunnerPhase) runnersv1alpha1.StepPhase {
 	switch rp {
 	case runnersv1alpha1.RunnerPhasePending:
 		return runnersv1alpha1.StepPhasePending
@@ -308,9 +302,6 @@ func runnerPhaseToStepPhase(rp runnersv1alpha1.RunnerPhase, step runnersv1alpha1
 	case runnersv1alpha1.RunnerPhaseSucceeded:
 		return runnersv1alpha1.StepPhaseSucceeded
 	case runnersv1alpha1.RunnerPhaseFailed:
-		if step.Retry != nil && step.Retry.MaxRetries > 0 && status.RetryCount < step.Retry.MaxRetries {
-			return runnersv1alpha1.StepPhaseRunning
-		}
 		return runnersv1alpha1.StepPhaseFailed
 	default:
 		return runnersv1alpha1.StepPhasePending
@@ -322,9 +313,12 @@ func upsertStepStatus(wf *runnersv1alpha1.Workflow, stepName string, phase runne
 		if s.Name == stepName {
 			if s.Phase != phase {
 				wf.Status.StepStatuses[i].Phase = phase
-				if phase == runnersv1alpha1.StepPhaseRunning && s.StartedAt == nil {
-					now := metav1.Now()
-					wf.Status.StepStatuses[i].StartedAt = &now
+				if phase == runnersv1alpha1.StepPhaseRunning {
+					if s.StartedAt == nil {
+						now := metav1.Now()
+						wf.Status.StepStatuses[i].StartedAt = &now
+					}
+					wf.Status.StepStatuses[i].CompletedAt = nil
 				}
 				if phase == runnersv1alpha1.StepPhaseSucceeded || phase == runnersv1alpha1.StepPhaseFailed {
 					now := metav1.Now()
