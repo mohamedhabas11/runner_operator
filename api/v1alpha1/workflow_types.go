@@ -86,7 +86,7 @@ type WorkflowStep struct {
 	DependsOn []string `json:"dependsOn,omitempty"`
 
 	// When is a condition expression that controls whether this step runs.
-	// Evaluated after all dependencies complete. E.g. "success()", "always()", "failed()".
+	// Evaluated after all dependencies complete. Accepted values: "on_success" (default), "on_failure", "always".
 	// +optional
 	When string `json:"when,omitempty"`
 
@@ -156,6 +156,10 @@ type WorkflowStatus struct {
 	// CompletionTime is when the workflow finished.
 	// +optional
 	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
+
+	// ObservedGeneration is the last generation the controller reconciled.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }
 
 // +kubebuilder:object:root=true

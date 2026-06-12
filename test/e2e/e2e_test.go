@@ -60,12 +60,22 @@ var _ = Describe("Manager", Ordered, func() {
 	})
 
 	AfterAll(func() {
+		By("deleting metrics ClusterRoleBinding")
+		cmd := exec.Command("kubectl", "delete", "clusterrolebinding", metricsRoleBindingName, "--ignore-not-found")
+		_, _ = utils.Run(cmd)
+
 		By("deleting test namespace")
-		cmd := exec.Command("kubectl", "delete", "ns", testNamespace, "--ignore-not-found")
+		cmd = exec.Command("kubectl", "delete", "ns", testNamespace, "--ignore-not-found")
 		_, _ = utils.Run(cmd)
 
 		By("cleaning up the curl pod for metrics")
 		cmd = exec.Command("kubectl", "delete", "pod", "curl-metrics", "-n", namespace)
+		_, _ = utils.Run(cmd)
+
+		By("cleaning up e2e Runner and Job resources across namespaces")
+		cmd = exec.Command("kubectl", "delete", "runner", "--all", "-n", testNamespace, "--ignore-not-found")
+		_, _ = utils.Run(cmd)
+		cmd = exec.Command("kubectl", "delete", "job", "--all", "-n", testNamespace, "--ignore-not-found")
 		_, _ = utils.Run(cmd)
 
 		By("undeploying the controller-manager")
@@ -316,6 +326,154 @@ spec:
 		})
 	})
 
+	Context("RunnerFailure", Ordered, func() {
+		const runnerName = "e2e-runner-fail"
+
+		AfterAll(func() {
+			By("deleting the Runner resource")
+			cmd := exec.Command("kubectl", "delete", "runner", runnerName, "-n", testNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+
+			By("deleting the associated Job")
+			cmd = exec.Command("kubectl", "delete", "job", runnerName+"-job", "-n", testNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should transition to Failed when the command exits non-zero", func() {
+			By("applying a Runner that fails")
+			applyRunner := fmt.Sprintf(`
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Runner
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  image: busybox:latest
+  command: ["sh", "-c"]
+  args: ["echo 'about to fail' && exit 1"]
+  timeoutAfter: "30s"
+`, runnerName, testNamespace)
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(applyRunner)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to apply Runner")
+
+			By("waiting for the Runner to transition to Failed")
+			verifyRunnerFailed := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "runner", runnerName, "-n", testNamespace,
+					"-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Failed"))
+			}
+			Eventually(verifyRunnerFailed, 3*time.Minute).Should(Succeed())
+
+			By("verifying the Job also reports failure")
+			verifyJobFailed := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "job", runnerName+"-job", "-n", testNamespace,
+					"-o", "jsonpath={.status.conditions[?(@.type=='Failed')].status}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("True"))
+			}
+			Eventually(verifyJobFailed).Should(Succeed())
+		})
+	})
+
+	Context("SpecDrift", Ordered, func() {
+		const runnerName = "e2e-spec-drift"
+
+		AfterAll(func() {
+			By("deleting the Runner resource")
+			cmd := exec.Command("kubectl", "delete", "runner", runnerName, "-n", testNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+
+			By("deleting the associated Job")
+			cmd = exec.Command("kubectl", "delete", "job", runnerName+"-job", "-n", testNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should recreate the Job when spec changes after completion", func() {
+			By("applying a Runner with initial spec")
+			applyRunner := fmt.Sprintf(`
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Runner
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  image: busybox:latest
+  command: ["sh", "-c"]
+  args: ["echo first-run && sleep 2"]
+  timeoutAfter: "30s"
+`, runnerName, testNamespace)
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(applyRunner)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to apply Runner")
+
+			By("waiting for initial Runner to succeed")
+			verifyRunnerSucceeded := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "runner", runnerName, "-n", testNamespace,
+					"-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Succeeded"))
+			}
+			Eventually(verifyRunnerSucceeded, 3*time.Minute).Should(Succeed())
+
+			By("recording the old Job UID")
+			getOldJobUID := func() string {
+				cmd := exec.Command("kubectl", "get", "job", runnerName+"-job", "-n", testNamespace,
+					"-o", "jsonpath={.metadata.uid}")
+				output, err := utils.Run(cmd)
+				Expect(err).NotTo(HaveOccurred())
+				return strings.TrimSpace(output)
+			}
+			oldUID := getOldJobUID()
+
+			By("updating the Runner spec with a different command")
+			updateRunner := fmt.Sprintf(`
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Runner
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  image: busybox:latest
+  command: ["sh", "-c"]
+  args: ["echo second-run && sleep 1"]
+  timeoutAfter: "30s"
+`, runnerName, testNamespace)
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(updateRunner)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to update Runner")
+
+			By("waiting for the Job to be recreated with a new UID")
+			verifyJobRecreated := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "job", runnerName+"-job", "-n", testNamespace,
+					"-o", "jsonpath={.metadata.uid}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				newUID := strings.TrimSpace(output)
+				g.Expect(newUID).NotTo(BeEmpty())
+				g.Expect(newUID).NotTo(Equal(oldUID), "Job should have been recreated with a new UID")
+			}
+			Eventually(verifyJobRecreated, 3*time.Minute).Should(Succeed())
+
+			By("verifying Runner eventually succeeds again with new spec")
+			verifyRunnerSucceededAgain := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "runner", runnerName, "-n", testNamespace,
+					"-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Succeeded"))
+			}
+			Eventually(verifyRunnerSucceededAgain, 3*time.Minute).Should(Succeed())
+		})
+	})
+
 	Context("Workflow", Ordered, func() {
 		const workflowName = "e2e-workflow"
 
@@ -418,6 +576,172 @@ spec:
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(ContainSubstring("step-one"))
 				g.Expect(output).To(ContainSubstring("step-two"))
+				g.Expect(output).To(ContainSubstring("Succeeded"))
+			}
+			Eventually(verifyStepStatuses).Should(Succeed())
+		})
+	})
+
+	Context("WorkflowTimeout", Ordered, func() {
+		const wfName = "e2e-wf-timeout"
+
+		AfterAll(func() {
+			By("deleting the Workflow resource")
+			cmd := exec.Command("kubectl", "delete", "workflow", wfName, "-n", testNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+
+			By("deleting any Runner resources created by the Workflow")
+			cmd = exec.Command("kubectl", "delete", "runner", "-l",
+				"runner-operator.io/workflow="+wfName, "-n", testNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should fail when the workflow timeout is exceeded", func() {
+			By("applying a Workflow with a short timeout")
+			applyWF := fmt.Sprintf(`
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Workflow
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  timeout: "10s"
+  steps:
+    - name: long-step
+      image: busybox:latest
+      command: ["sh", "-c"]
+      args: ["echo starting && sleep 120"]
+      timeout: "5m"
+`, wfName, testNamespace)
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(applyWF)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to apply Workflow")
+
+			By("waiting for the Workflow to transition to Failed due to timeout")
+			verifyWorkflowFailed := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "workflow", wfName, "-n", testNamespace,
+					"-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Failed"))
+			}
+			Eventually(verifyWorkflowFailed, 2*time.Minute).Should(Succeed())
+
+			By("verifying the completionTime is set")
+			verifyCompletionTime := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "workflow", wfName, "-n", testNamespace,
+					"-o", "jsonpath={.status.completionTime}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).NotTo(BeEmpty())
+			}
+			Eventually(verifyCompletionTime).Should(Succeed())
+		})
+	})
+
+	Context("WorkflowOnFailure", Ordered, func() {
+		const wfName = "e2e-wf-onfailure"
+
+		AfterAll(func() {
+			By("deleting the Workflow resource")
+			cmd := exec.Command("kubectl", "delete", "workflow", wfName, "-n", testNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+
+			By("deleting any Runner resources created by the Workflow")
+			cmd = exec.Command("kubectl", "delete", "runner", "-l",
+				"runner-operator.io/workflow="+wfName, "-n", testNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should run the on_failure step when a dependency fails", func() {
+			By("applying a Workflow with a failing step and an on_failure handler")
+			applyWF := fmt.Sprintf(`
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Workflow
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  steps:
+    - name: fail-step
+      image: busybox:latest
+      command: ["sh", "-c"]
+      args: ["echo failing && exit 1"]
+      timeout: "30s"
+    - name: cleanup-step
+      image: busybox:latest
+      command: ["sh", "-c"]
+      args: ["echo cleaning up after failure && sleep 1"]
+      dependsOn: ["fail-step"]
+      when: "on_failure"
+      timeout: "30s"
+`, wfName, testNamespace)
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(applyWF)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to apply Workflow")
+
+			By("waiting for fail-step Runner to be created")
+			failStepRunner := fmt.Sprintf("%s-fail-step", wfName)
+			verifyFailStepRunner := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "runner", failStepRunner, "-n", testNamespace,
+					"-o", "jsonpath={.metadata.name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal(failStepRunner))
+			}
+			Eventually(verifyFailStepRunner).Should(Succeed())
+
+			By("waiting for fail-step to fail")
+			verifyFailStepFailed := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "runner", failStepRunner, "-n", testNamespace,
+					"-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Failed"))
+			}
+			Eventually(verifyFailStepFailed, 3*time.Minute).Should(Succeed())
+
+			By("waiting for cleanup-step Runner to be created")
+			cleanupStepRunner := fmt.Sprintf("%s-cleanup-step", wfName)
+			verifyCleanupRunner := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "runner", cleanupStepRunner, "-n", testNamespace,
+					"-o", "jsonpath={.metadata.name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal(cleanupStepRunner))
+			}
+			Eventually(verifyCleanupRunner).Should(Succeed())
+
+			By("waiting for cleanup-step to succeed")
+			verifyCleanupSucceeded := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "runner", cleanupStepRunner, "-n", testNamespace,
+					"-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Succeeded"))
+			}
+			Eventually(verifyCleanupSucceeded, 3*time.Minute).Should(Succeed())
+
+			By("verifying the Workflow status is Failed (at least one step failed)")
+			verifyWorkflowFailed := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "workflow", wfName, "-n", testNamespace,
+					"-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Failed"))
+			}
+			Eventually(verifyWorkflowFailed).Should(Succeed())
+
+			By("verifying step statuses include both steps")
+			verifyStepStatuses := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "workflow", wfName, "-n", testNamespace,
+					"-o", "jsonpath={.status.stepStatuses}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(ContainSubstring("fail-step"))
+				g.Expect(output).To(ContainSubstring("cleanup-step"))
 				g.Expect(output).To(ContainSubstring("Succeeded"))
 			}
 			Eventually(verifyStepStatuses).Should(Succeed())

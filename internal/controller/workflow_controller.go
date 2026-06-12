@@ -3,11 +3,15 @@ package controller
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
+	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -19,13 +23,15 @@ import (
 // WorkflowReconciler reconciles a Workflow object.
 type WorkflowReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=workflows,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=workflows/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=runners,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=runners/status,verbs=get
+// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 
 func (r *WorkflowReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -41,7 +47,23 @@ func (r *WorkflowReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	if len(wf.Spec.Steps) == 0 {
+		r.Recorder.Event(wf, corev1.EventTypeWarning, "NoSteps", "Workflow has no steps defined")
 		return ctrl.Result{}, nil
+	}
+
+	if cycle := detectCycle(wf.Spec.Steps); cycle != "" {
+		logger.Info("Cycle detected in workflow steps", "cycle", cycle)
+		r.Recorder.Eventf(wf, corev1.EventTypeWarning, "CycleDetected", "Dependency cycle detected: %s", cycle)
+		return ctrl.Result{}, nil
+	}
+
+	updated := false
+
+	if wf.Spec.Timeout != nil && !isWorkflowTerminal(wf.Status.Phase) && wf.Status.StartTime != nil {
+		elapsed := time.Since(wf.Status.StartTime.Time)
+		if elapsed > wf.Spec.Timeout.Duration {
+			return r.handleTimeout(ctx, wf, elapsed)
+		}
 	}
 
 	stepRunners, err := r.listStepRunners(ctx, wf)
@@ -49,16 +71,17 @@ func (r *WorkflowReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 
-	updated := r.reconcileSteps(ctx, wf, stepRunners)
-
 	if wf.Status.StartTime == nil {
 		now := metav1.Now()
 		wf.Status.StartTime = &now
 		updated = true
 	}
 
+	updated = r.reconcileSteps(ctx, wf, stepRunners) || updated
+
 	newPhase := computeWorkflowPhase(wf)
 	if newPhase != wf.Status.Phase {
+		r.Recorder.Eventf(wf, corev1.EventTypeNormal, "PhaseChanged", "Workflow phase changed to %s", newPhase)
 		wf.Status.Phase = newPhase
 		updated = true
 	}
@@ -69,6 +92,7 @@ func (r *WorkflowReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	if updated {
+		wf.Status.ObservedGeneration = wf.Generation
 		patchBase := client.MergeFrom(wf.DeepCopy())
 		if err := r.Status().Patch(ctx, wf, patchBase); err != nil {
 			return ctrl.Result{}, err
@@ -86,6 +110,27 @@ func (r *WorkflowReconciler) listStepRunners(ctx context.Context, wf *runnersv1a
 		return nil, err
 	}
 	return runnerList.Items, nil
+}
+
+func (r *WorkflowReconciler) handleTimeout(ctx context.Context, wf *runnersv1alpha1.Workflow, elapsed time.Duration) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	logger.Info("Workflow timed out", "timeout", wf.Spec.Timeout.Duration, "elapsed", elapsed)
+	r.Recorder.Event(wf, corev1.EventTypeWarning, "TimedOut", "Workflow timed out")
+
+	for _, step := range wf.Spec.Steps {
+		upsertStepStatus(wf, step.Name, runnersv1alpha1.StepPhaseFailed)
+	}
+
+	wf.Status.Phase = runnersv1alpha1.WorkflowPhaseFailed
+	now := metav1.Now()
+	wf.Status.CompletionTime = &now
+	wf.Status.ObservedGeneration = wf.Generation
+
+	patchBase := client.MergeFrom(wf.DeepCopy())
+	if err := r.Status().Patch(ctx, wf, patchBase); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
 }
 
 func (r *WorkflowReconciler) reconcileSteps(ctx context.Context, wf *runnersv1alpha1.Workflow, stepRunners []runnersv1alpha1.Runner) bool {
@@ -140,6 +185,7 @@ func (r *WorkflowReconciler) reconcileSteps(ctx context.Context, wf *runnersv1al
 					continue
 				}
 				logger.Info("Creating Runner for step", "step", step.Name)
+				r.Recorder.Eventf(wf, corev1.EventTypeNormal, "StepRunnerCreated", "Created Runner for step %q", step.Name)
 				if err := r.Create(ctx, runner); err != nil {
 					logger.Error(err, "Failed to create Runner", "step", step.Name)
 					continue
@@ -155,11 +201,15 @@ func (r *WorkflowReconciler) reconcileSteps(ctx context.Context, wf *runnersv1al
 				if stepPhase == runnersv1alpha1.StepPhaseFailed &&
 					step.Retry != nil && step.Retry.MaxRetries > 0 &&
 					status.RetryCount < step.Retry.MaxRetries {
+					if !retryBackoffElapsed(&step, &status) {
+						continue
+					}
 					logger.Info("Step failed, retrying", "step", step.Name, "attempt", status.RetryCount+1)
+					r.Recorder.Eventf(wf, corev1.EventTypeNormal, "StepRetrying", "Step %q failed, retrying (attempt %d/%d)", step.Name, status.RetryCount+1, step.Retry.MaxRetries)
 					if err := r.Delete(ctx, &existing); err != nil {
 						logger.Error(err, "Failed to delete failed Runner for retry", "step", step.Name)
 					}
-					stepPhase = runnersv1alpha1.StepPhaseRunning
+					stepPhase = runnersv1alpha1.StepPhasePending
 					upsertStepStatus(wf, step.Name, stepPhase)
 					for i, s := range wf.Status.StepStatuses {
 						if s.Name == step.Name {
@@ -227,8 +277,27 @@ func evaluateStep(step runnersv1alpha1.WorkflowStep, stepStatusMap map[string]ru
 	}
 }
 
+func sanitizeStepName(name string) string {
+	sanitized := strings.ToLower(name)
+	sanitized = strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			return r
+		}
+		return '-'
+	}, sanitized)
+	sanitized = strings.Trim(sanitized, "-")
+	if len(sanitized) > 50 {
+		sanitized = sanitized[:50]
+	}
+	sanitized = strings.Trim(sanitized, "-")
+	if sanitized == "" {
+		sanitized = "step"
+	}
+	return sanitized
+}
+
 func (r *WorkflowReconciler) buildStepRunner(ctx context.Context, wf *runnersv1alpha1.Workflow, step *runnersv1alpha1.WorkflowStep) *runnersv1alpha1.Runner {
-	runnerName := fmt.Sprintf("%s-%s", wf.Name, step.Name)
+	runnerName := fmt.Sprintf("%s-%s", wf.Name, sanitizeStepName(step.Name))
 
 	spec := runnersv1alpha1.RunnerSpec{
 		Command: step.Command,
@@ -275,6 +344,50 @@ func (r *WorkflowReconciler) buildStepRunner(ctx context.Context, wf *runnersv1a
 		},
 		Spec: spec,
 	}
+}
+
+func detectCycle(steps []runnersv1alpha1.WorkflowStep) string {
+	stepNames := map[string]bool{}
+	for _, s := range steps {
+		stepNames[s.Name] = true
+	}
+
+	for _, s := range steps {
+		for _, dep := range s.DependsOn {
+			if !stepNames[dep] {
+				return fmt.Sprintf("step %q depends on unknown step %q", s.Name, dep)
+			}
+		}
+	}
+
+	visited := map[string]int{}
+	var dfs func(name string) bool
+	dfs = func(name string) bool {
+		if visited[name] == 1 {
+			return true
+		}
+		if visited[name] == 2 {
+			return false
+		}
+		visited[name] = 1
+		for _, s := range steps {
+			if s.Name == name {
+				if slices.ContainsFunc(s.DependsOn, dfs) {
+					return true
+				}
+				break
+			}
+		}
+		visited[name] = 2
+		return false
+	}
+
+	for _, s := range steps {
+		if dfs(s.Name) {
+			return fmt.Sprintf("cycle detected involving step %q", s.Name)
+		}
+	}
+	return ""
 }
 
 func buildStepStatusMap(wf *runnersv1alpha1.Workflow) map[string]runnersv1alpha1.StepStatus {
@@ -387,8 +500,25 @@ func isWorkflowTerminal(phase runnersv1alpha1.WorkflowPhase) bool {
 	return phase == runnersv1alpha1.WorkflowPhaseSucceeded || phase == runnersv1alpha1.WorkflowPhaseFailed
 }
 
+func retryBackoffElapsed(step *runnersv1alpha1.WorkflowStep, status *runnersv1alpha1.StepStatus) bool {
+	if step.Retry == nil || step.Retry.Backoff == nil || status.CompletedAt == nil {
+		return true
+	}
+
+	delay := step.Retry.Backoff.InitialDelay.Duration
+	for i := 0; i < status.RetryCount; i++ {
+		delay *= 2
+	}
+	if step.Retry.Backoff.MaxDelay != nil && delay > step.Retry.Backoff.MaxDelay.Duration {
+		delay = step.Retry.Backoff.MaxDelay.Duration
+	}
+
+	return time.Since(status.CompletedAt.Time) >= delay
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *WorkflowReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.Recorder = mgr.GetEventRecorderFor("workflow-controller")
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&runnersv1alpha1.Workflow{}).
 		Owns(&runnersv1alpha1.Runner{}).

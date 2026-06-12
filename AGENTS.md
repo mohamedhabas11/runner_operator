@@ -318,3 +318,15 @@ make docker-build docker-push IMG=$IMG
 - **controller-runtime**: https://github.com/kubernetes-sigs/controller-runtime
 - **controller-tools**: https://github.com/kubernetes-sigs/controller-tools
 - **Kubebuilder Repo**: https://github.com/kubernetes-sigs/kubebuilder
+
+## Consultants
+
+Available subagent consultants for delegating heavy tasks:
+
+| Name | Model | When to use |
+|------|-------|-------------|
+| `deepseek` | DeepSeek Flash | Free model for code review, debugging, refactoring. Invoke via `task` tool with `subagent_type: "deepseek"`. |
+| Gemini CLI | `gemini "prompt"` | Long-context analysis, code review. Requires `which gemini`. |
+| Codex CLI | `codex exec "prompt"` | OpenAI-ecosystem work. Requires `which codex`. |
+
+DeepSeek Flash is configured globally in `~/.config/opencode/opencode.jsonc`. Get a free API key at https://platform.deepseek.com/.

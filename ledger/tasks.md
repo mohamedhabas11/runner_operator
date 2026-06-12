@@ -100,8 +100,53 @@
 
 **Gemini second review verdict:** "The operator is much more robust" — all previous critical issues resolved.
 
+### Session 5 — Code Review & Improvement Plan
+
+**Work Done:**
+- Performed comprehensive codebase scan via `opencode`
+- Identified 20 improvement areas across API design, controller logic, observability, testing, and code quality
+- Prioritized top 5 most impactful: Conditions population, validating webhooks, timeout enforcement, retry backoff, events + ObservedGeneration
+
+### Session 6 & 7 — Implement Improvements & E2E Tests (opencode)
+
+**Work Done:**
+- **Populated `ObservedGeneration`** in both `RunnerStatus` and `WorkflowStatus`, set on every successful reconciliation
+- **Added Event recording** to both controllers:
+  - Runner: JobCreated, SpecDrift, PhaseChanged
+  - Workflow: NoSteps, CycleDetected, TimedOut, PhaseChanged, StepRunnerCreated, StepRetrying
+- **Enforced Workflow timeout** — `handleTimeout()` marks all incomplete steps as Failed, sets workflow phase to Failed, and patches CompletionTime
+- **Implemented retry backoff** — `retryBackoffElapsed()` computes exponential backoff (`InitialDelay * 2^retryCount`, capped at `MaxDelay`) and waits before retrying
+- **Fixed `When` docs** — Changed from incorrect `"success()"`/`"always()"` examples to actual accepted values `"on_success"`, `"on_failure"`, `"always"`
+- **Added step name sanitization** — `sanitizeStepName()` lowercases, replaces invalid chars, truncates to 50 chars for safe K8s resource names
+- **Fixed retry phase** — Changed from `StepPhaseRunning` to `StepPhasePending` when retrying (Runner hasn't started yet)
+- **Added DAG cycle detection** — `detectCycle()` uses DFS to find dependency cycles and surfaces via events
+- **Made dev logging configurable** — Changed `--zap-devel` flag (defaults to `false`), controlled via `Development` option
+- **Added RBAC markers** for `events.k8s.io` on both controllers
+
+**Test Results:** `make test` — 2/2 passing, coverage 41.2% (up from 32.4%)
+**Lint:** `make lint-fix` — 0 issues
+
+### Session 7 — Improve E2E Tests
+
+**Work Done:**
+- **Fixed cleanup** — Added ClusterRoleBinding deletion in `AfterAll` to prevent resource leaks
+- **Added Runner failure test** (`RunnerFailure` context) — Creates a Runner that exits non-zero (`exit 1`), verifies it reaches `Failed` phase and the underlying Job reports failure
+- **Added spec drift test** (`SpecDrift` context) — Creates a Runner, waits for completion, updates the command, verifies the Job is recreated with a new UID, then verifies the Runner completes successfully with the new spec
+- **Added Workflow timeout test** (`WorkflowTimeout` context) — Creates a Workflow with a 10s timeout and a step that runs for 120s, verifies the workflow reaches `Failed` and sets `completionTime`
+- **Added Workflow on_failure test** (`WorkflowOnFailure` context) — Creates a Workflow where step-one fails (`exit 1`) and step-two runs with `when: "on_failure"`, verifies step-one fails, step-two succeeds, and the workflow overall is `Failed`
+- **Fixed syntax bug** — Added missing closing `)` at end of `Describe(...)` call, which caused a compile error
+
+**E2E compilation:** `go vet -tags=e2e ./test/e2e/` — OK
+**Lint:** `make lint-fix` — 0 issues
+
+## Current Session
+
+*(none in progress)*
+
 ## Deferred / Skipped
 
 ### P2 — Nice to Have
 
 - [ ] **Improve Conditions** — Add Reason/Message to status conditions for better observability. Low priority; functional behavior unchanged.
+- [ ] **Validating webhooks** — Block invalid specs at admission time.
+- [ ] **Topological sort of steps** — Process steps in dependency order, not slice order.

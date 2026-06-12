@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -24,7 +25,8 @@ import (
 // RunnerReconciler reconciles a Runner object.
 type RunnerReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=runners,verbs=get;list;watch;create;update;patch;delete
@@ -32,6 +34,7 @@ type RunnerReconciler struct {
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=batch,resources=jobs/status,verbs=get
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 
 func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -66,9 +69,12 @@ func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			return ctrl.Result{}, err
 		}
 
+		r.Recorder.Event(runner, corev1.EventTypeNormal, "JobCreated", "Job created for Runner")
+
 		patchBase := client.MergeFrom(runner.DeepCopy())
 		runner.Status.Phase = runnersv1alpha1.RunnerPhasePending
 		runner.Status.ResourceHash = specHash
+		runner.Status.ObservedGeneration = runner.Generation
 		if err := r.Status().Patch(ctx, runner, patchBase); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -84,6 +90,7 @@ func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			return ctrl.Result{}, nil
 		}
 		logger.Info("Spec drift detected, deleting and recreating Job")
+		r.Recorder.Event(runner, corev1.EventTypeNormal, "SpecDrift", "Spec changed, recreating Job")
 		if err := r.Delete(ctx, existingJob); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -189,13 +196,18 @@ func (r *RunnerReconciler) updateStatusFromJob(ctx context.Context, runner *runn
 	}
 
 	if runner.Status.Phase == phase &&
+		runner.Status.ObservedGeneration == runner.Generation &&
 		metav1TimePtrEqual(runner.Status.StartTime, startTime) &&
 		metav1TimePtrEqual(runner.Status.CompletionTime, completionTime) {
 		return ctrl.Result{}, nil
 	}
 
 	patchBase := client.MergeFrom(runner.DeepCopy())
+	if runner.Status.Phase != phase {
+		r.Recorder.Eventf(runner, corev1.EventTypeNormal, "PhaseChanged", "Runner phase changed to %s", phase)
+	}
 	runner.Status.Phase = phase
+	runner.Status.ObservedGeneration = runner.Generation
 	if startTime != nil {
 		runner.Status.StartTime = startTime
 	}
@@ -212,6 +224,7 @@ func (r *RunnerReconciler) updateStatusFromJob(ctx context.Context, runner *runn
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *RunnerReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.Recorder = mgr.GetEventRecorderFor("runner-controller")
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&runnersv1alpha1.Runner{}).
 		Owns(&batchv1.Job{}).
