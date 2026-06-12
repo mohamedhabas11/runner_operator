@@ -103,6 +103,66 @@ func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 func (r *RunnerReconciler) buildJob(runner *runnersv1alpha1.Runner, jobName, specHash string) *batchv1.Job {
 	backoffLimit := int32(0)
 
+	containers := []corev1.Container{
+		{
+			Name:         "runner",
+			Image:        runner.Spec.Image,
+			Env:          runner.Spec.Env,
+			EnvFrom:      runner.Spec.EnvFrom,
+			Args:         runner.Spec.Args,
+			Command:      runner.Spec.Command,
+			Resources:    runner.Spec.Resources,
+			VolumeMounts: runner.Spec.Mounts,
+			SecurityContext: &corev1.SecurityContext{
+				AllowPrivilegeEscalation: ptr.To(false),
+				ReadOnlyRootFilesystem:   ptr.To(true),
+				Capabilities: &corev1.Capabilities{
+					Drop: []corev1.Capability{"ALL"},
+				},
+			},
+		},
+	}
+
+	volumes := runner.Spec.Volumes
+	var initContainers []corev1.Container
+
+	if runner.Spec.GitRepo != nil {
+		gitVolumeName := "runner-operator-git-repo"
+		gitCloneVolume := corev1.Volume{
+			Name: gitVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		}
+		volumes = append(volumes, gitCloneVolume)
+
+		if runner.Spec.GitRepo.Auth != nil && runner.Spec.GitRepo.Auth.SecretRef != nil {
+			volumes = append(volumes, corev1.Volume{
+				Name: "runner-operator-git-auth",
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName: runner.Spec.GitRepo.Auth.SecretRef.Name,
+					},
+				},
+			})
+		}
+
+		gitMount := corev1.VolumeMount{
+			Name:      gitVolumeName,
+			MountPath: "/workspace",
+		}
+		containers[0].VolumeMounts = append(containers[0].VolumeMounts, gitMount)
+
+		initContainer := buildGitInitContainer(runner.Spec.GitRepo, gitVolumeName)
+		initContainers = append(initContainers, initContainer)
+
+		workDir := "/workspace/repo"
+		if runner.Spec.GitRepo.Path != "" {
+			workDir = workDir + "/" + runner.Spec.GitRepo.Path
+		}
+		containers[0].WorkingDir = workDir
+	}
+
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
@@ -124,33 +184,11 @@ func (r *RunnerReconciler) buildJob(runner *runnersv1alpha1.Runner, jobName, spe
 					},
 				},
 				Spec: corev1.PodSpec{
-					RestartPolicy: corev1.RestartPolicyNever,
-					SecurityContext: &corev1.PodSecurityContext{
-						RunAsNonRoot: ptr.To(true),
-						SeccompProfile: &corev1.SeccompProfile{
-							Type: corev1.SeccompProfileTypeRuntimeDefault,
-						},
-					},
-					Containers: []corev1.Container{
-						{
-							Name:         "runner",
-							Image:        runner.Spec.Image,
-							Env:          runner.Spec.Env,
-							EnvFrom:      runner.Spec.EnvFrom,
-							Args:         runner.Spec.Args,
-							Command:      runner.Spec.Command,
-							Resources:    runner.Spec.Resources,
-							VolumeMounts: runner.Spec.Mounts,
-							SecurityContext: &corev1.SecurityContext{
-								AllowPrivilegeEscalation: ptr.To(false),
-								ReadOnlyRootFilesystem:   ptr.To(true),
-								Capabilities: &corev1.Capabilities{
-									Drop: []corev1.Capability{"ALL"},
-								},
-							},
-						},
-					},
-					Volumes: runner.Spec.Volumes,
+					RestartPolicy:   corev1.RestartPolicyNever,
+					InitContainers:  initContainers,
+					Containers:      containers,
+					Volumes:         volumes,
+					SecurityContext: runnerSecurityContext(),
 				},
 			},
 		},
@@ -163,6 +201,74 @@ func (r *RunnerReconciler) buildJob(runner *runnersv1alpha1.Runner, jobName, spe
 	}
 
 	return job
+}
+
+func runnerSecurityContext() *corev1.PodSecurityContext {
+	return &corev1.PodSecurityContext{
+		RunAsNonRoot: ptr.To(true),
+		RunAsUser:    ptr.To(int64(1000)),
+		SeccompProfile: &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeRuntimeDefault,
+		},
+	}
+}
+
+func buildGitInitContainer(gitRepo *runnersv1alpha1.GitRepo, volumeName string) corev1.Container {
+	script := buildGitCloneScript(gitRepo)
+
+	c := corev1.Container{
+		Name:    "git-clone",
+		Image:   "alpine/git:latest",
+		Command: []string{"/bin/sh", "-c"},
+		Args:    []string{script},
+		VolumeMounts: []corev1.VolumeMount{
+			{Name: volumeName, MountPath: "/workspace"},
+		},
+		SecurityContext: &corev1.SecurityContext{
+			RunAsNonRoot:             ptr.To(true),
+			RunAsUser:                ptr.To(int64(1000)),
+			AllowPrivilegeEscalation: ptr.To(false),
+			Capabilities: &corev1.Capabilities{
+				Drop: []corev1.Capability{"ALL"},
+			},
+		},
+	}
+
+	if gitRepo.Auth != nil && gitRepo.Auth.SecretRef != nil {
+		c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{
+			Name:      "runner-operator-git-auth",
+			MountPath: "/etc/git-auth",
+			ReadOnly:  true,
+		})
+	}
+
+	return c
+}
+
+func buildGitCloneScript(gitRepo *runnersv1alpha1.GitRepo) string {
+	cloneURL := gitRepo.URL
+	var script string
+
+	if gitRepo.Auth != nil && gitRepo.Auth.SecretRef != nil {
+		script += `if [ -f /etc/git-auth/ssh-privatekey ]; then
+  mkdir -p ~/.ssh
+  cp /etc/git-auth/ssh-privatekey ~/.ssh/id_rsa
+  chmod 600 ~/.ssh/id_rsa
+  ssh-keyscan github.com gitlab.com bitbucket.org >> ~/.ssh/known_hosts 2>/dev/null || true
+fi
+`
+	}
+
+	script += "git clone --depth 1 " + cloneURL + " /workspace/repo"
+	if gitRepo.Revision != "" {
+		script += ` && git -C /workspace/repo fetch origin "` + gitRepo.Revision + `" && git -C /workspace/repo checkout "` + gitRepo.Revision + `"`
+	}
+
+	if gitRepo.Auth != nil && gitRepo.Auth.SecretRef != nil {
+		script += ` && rm -rf ~/.ssh`
+	}
+
+	return script
 }
 
 func (r *RunnerReconciler) updateStatusFromJob(ctx context.Context, runner *runnersv1alpha1.Runner, job *batchv1.Job) (ctrl.Result, error) {

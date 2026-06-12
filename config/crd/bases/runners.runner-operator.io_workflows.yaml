@@ -225,6 +225,50 @@ spec:
                         - name
                         type: object
                       type: array
+                    gitRepo:
+                      description: |-
+                        GitRepo defines a Git repository to clone before executing the step.
+                        When set, an init container clones the repo into a shared volume and the
+                        main container's working directory is set to the checkout path.
+                      properties:
+                        auth:
+                          description: Auth defines authentication for private repositories.
+                          properties:
+                            secretRef:
+                              description: |-
+                                SecretRef references a Secret containing Git credentials.
+                                For SSH auth: the secret must have key "ssh-privatekey".
+                                For HTTPS auth: the secret must have keys "username" and "password".
+                              properties:
+                                name:
+                                  default: ""
+                                  description: |-
+                                    Name of the referent.
+                                    This field is effectively required, but due to backwards compatibility is
+                                    allowed to be empty. Instances of this type with an empty value here are
+                                    almost certainly wrong.
+                                    More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                  type: string
+                              type: object
+                              x-kubernetes-map-type: atomic
+                          type: object
+                        path:
+                          description: |-
+                            Path within the repository to use as the working directory.
+                            Example: "terraform/prod" or "ansible/playbooks".
+                          type: string
+                        revision:
+                          description: |-
+                            Revision is the branch, tag, or commit SHA to checkout.
+                            Defaults to the remote HEAD if empty.
+                          type: string
+                        url:
+                          description: URL of the Git repository to clone (HTTPS or
+                            SSH).
+                          type: string
+                      required:
+                      - url
+                      type: object
                     image:
                       description: Image is the Docker image to run (inline alternative
                         to RunnerRef).

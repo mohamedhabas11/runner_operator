@@ -16,6 +16,36 @@ const (
 	RunnerPhaseUnknown   RunnerPhase = "Unknown"
 )
 
+// GitAuth defines authentication for cloning a Git repository.
+type GitAuth struct {
+	// SecretRef references a Secret containing Git credentials.
+	// For SSH auth: the secret must have key "ssh-privatekey".
+	// For HTTPS auth: the secret must have keys "username" and "password".
+	// +optional
+	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
+}
+
+// GitRepo defines a Git repository to clone before executing the runner.
+type GitRepo struct {
+	// URL of the Git repository to clone (HTTPS or SSH).
+	// +required
+	URL string `json:"url"`
+
+	// Revision is the branch, tag, or commit SHA to checkout.
+	// Defaults to the remote HEAD if empty.
+	// +optional
+	Revision string `json:"revision,omitempty"`
+
+	// Path within the repository to use as the working directory.
+	// Example: "terraform/prod" or "ansible/playbooks".
+	// +optional
+	Path string `json:"path,omitempty"`
+
+	// Auth defines authentication for private repositories.
+	// +optional
+	Auth *GitAuth `json:"auth,omitempty"`
+}
+
 // RunnerSpec defines the desired state of Runner.
 type RunnerSpec struct {
 	// Image is the Docker image to run.
@@ -54,6 +84,12 @@ type RunnerSpec struct {
 	// Resources defines CPU and memory limits/requests for the runner container.
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// GitRepo defines a Git repository to clone before executing the command.
+	// When set, an init container clones the repo into a shared volume and the
+	// main container's working directory is set to the checkout path.
+	// +optional
+	GitRepo *GitRepo `json:"gitRepo,omitempty"`
 }
 
 // RunnerStatus defines the observed state of Runner.

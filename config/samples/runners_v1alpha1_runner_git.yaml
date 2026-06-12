@@ -1,0 +1,13 @@
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Runner
+metadata:
+  name: runner-git-sample
+spec:
+  image: hashicorp/terraform:1.6
+  command: ["terraform"]
+  args: ["apply", "-auto-approve"]
+  gitRepo:
+    url: https://github.com/example/terraform-infra.git
+    revision: main
+    path: environments/prod
+  timeoutAfter: "30m"

@@ -262,6 +262,83 @@ var _ = Describe("Manager", Ordered, func() {
 		})
 	})
 
+	Context("RunnerGit", Ordered, func() {
+		const runnerName = "e2e-runner-git"
+
+		AfterAll(func() {
+			By("deleting the Runner resource")
+			cmd := exec.Command("kubectl", "delete", "runner", runnerName, "-n", testNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+
+			By("deleting the associated Job")
+			cmd = exec.Command("kubectl", "delete", "job", runnerName+"-job", "-n", testNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should clone a public repo and run a command from it", func() {
+			By("applying a Runner with gitRepo")
+			applyRunner := fmt.Sprintf(`
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Runner
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  image: busybox:latest
+  command: ["sh", "-c"]
+  args: ["ls -la /workspace/repo/README"]
+  gitRepo:
+    url: https://github.com/octocat/hello-world.git
+    revision: master
+  timeoutAfter: "5m"
+`, runnerName, testNamespace)
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(applyRunner)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to apply Runner with gitRepo")
+
+			By("waiting for the Job to be created")
+			verifyJobCreated := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "job", runnerName+"-job", "-n", testNamespace,
+					"-o", "jsonpath={.metadata.name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal(runnerName + "-job"))
+			}
+			Eventually(verifyJobCreated).Should(Succeed())
+
+			By("waiting for the Runner to complete successfully")
+			verifyRunnerSucceeded := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "runner", runnerName, "-n", testNamespace,
+					"-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Succeeded"))
+			}
+			Eventually(verifyRunnerSucceeded, 3*time.Minute).Should(Succeed())
+
+			By("verifying the Job has an init container for git clone")
+			verifyInitContainer := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "job", runnerName+"-job", "-n", testNamespace,
+					"-o", "jsonpath={.spec.template.spec.initContainers[0].name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("git-clone"))
+			}
+			Eventually(verifyInitContainer).Should(Succeed())
+
+			By("verifying the runner container has a working directory")
+			verifyWorkingDir := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "job", runnerName+"-job", "-n", testNamespace,
+					"-o", "jsonpath={.spec.template.spec.containers[0].workingDir}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("/workspace/repo"))
+			}
+			Eventually(verifyWorkingDir).Should(Succeed())
+		})
+	})
+
 	Context("Runner", Ordered, func() {
 		const runnerName = "e2e-runner"
 

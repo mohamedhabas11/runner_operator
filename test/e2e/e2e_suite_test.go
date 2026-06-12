@@ -62,6 +62,15 @@ var _ = BeforeSuite(func() {
 	err = utils.LoadImageToKindClusterWithName(managerImage)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the manager image into Kind")
 
+	By("pre-pulling the git init container image")
+	cmd = exec.Command("docker", "pull", "alpine/git:latest")
+	_, err = utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to pull alpine/git image")
+
+	By("loading the git init container image on Kind")
+	err = utils.LoadImageToKindClusterWithName("alpine/git:latest")
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load alpine/git image into Kind")
+
 	configureKubectlKubeRC()
 	setupCertManager()
 })

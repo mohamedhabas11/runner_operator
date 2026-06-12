@@ -1,0 +1,27 @@
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Workflow
+metadata:
+  name: workflow-git-sample
+spec:
+  timeout: "1h"
+  steps:
+    - name: terraform-plan
+      image: hashicorp/terraform:1.6
+      command: ["terraform"]
+      args: ["plan"]
+      gitRepo:
+        url: https://github.com/example/terraform-infra.git
+        revision: main
+        path: environments/staging
+      timeout: "10m"
+    - name: terraform-apply
+      image: hashicorp/terraform:1.6
+      command: ["terraform"]
+      args: ["apply", "-auto-approve"]
+      gitRepo:
+        url: https://github.com/example/terraform-infra.git
+        revision: main
+        path: environments/staging
+      dependsOn: ["terraform-plan"]
+      when: "on_success"
+      timeout: "30m"

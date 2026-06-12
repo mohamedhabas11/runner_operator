@@ -71,6 +71,8 @@ func (r *WorkflowReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 
+	patchBase := client.MergeFrom(wf.DeepCopy())
+
 	if wf.Status.StartTime == nil {
 		now := metav1.Now()
 		wf.Status.StartTime = &now
@@ -93,12 +95,18 @@ func (r *WorkflowReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	if updated {
 		wf.Status.ObservedGeneration = wf.Generation
-		patchBase := client.MergeFrom(wf.DeepCopy())
 		if err := r.Status().Patch(ctx, wf, patchBase); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
 
+	if !isWorkflowTerminal(wf.Status.Phase) && wf.Spec.Timeout != nil && wf.Status.StartTime != nil {
+		elapsed := time.Since(wf.Status.StartTime.Time)
+		remaining := wf.Spec.Timeout.Duration - elapsed
+		if remaining > 0 {
+			return ctrl.Result{RequeueAfter: remaining}, nil
+		}
+	}
 	return ctrl.Result{}, nil
 }
 
@@ -117,6 +125,8 @@ func (r *WorkflowReconciler) handleTimeout(ctx context.Context, wf *runnersv1alp
 	logger.Info("Workflow timed out", "timeout", wf.Spec.Timeout.Duration, "elapsed", elapsed)
 	r.Recorder.Event(wf, corev1.EventTypeWarning, "TimedOut", "Workflow timed out")
 
+	patchBase := client.MergeFrom(wf.DeepCopy())
+
 	for _, step := range wf.Spec.Steps {
 		upsertStepStatus(wf, step.Name, runnersv1alpha1.StepPhaseFailed)
 	}
@@ -126,7 +136,6 @@ func (r *WorkflowReconciler) handleTimeout(ctx context.Context, wf *runnersv1alp
 	wf.Status.CompletionTime = &now
 	wf.Status.ObservedGeneration = wf.Generation
 
-	patchBase := client.MergeFrom(wf.DeepCopy())
 	if err := r.Status().Patch(ctx, wf, patchBase); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -323,6 +332,9 @@ func (r *WorkflowReconciler) buildStepRunner(ctx context.Context, wf *runnersv1a
 			if step.Timeout != nil {
 				spec.TimeoutAfter = step.Timeout
 			}
+			if step.GitRepo != nil {
+				spec.GitRepo = step.GitRepo
+			}
 		} else {
 			stepRef := fmt.Sprintf("%s/%s", wf.Namespace, step.RunnerRef.Name)
 			log.FromContext(ctx).Error(err, "RunnerRef not found, using default image", "runnerRef", stepRef)
@@ -330,6 +342,10 @@ func (r *WorkflowReconciler) buildStepRunner(ctx context.Context, wf *runnersv1a
 		}
 	} else {
 		spec.Image = "busybox:latest"
+	}
+
+	if step.GitRepo != nil {
+		spec.GitRepo = step.GitRepo
 	}
 
 	return &runnersv1alpha1.Runner{

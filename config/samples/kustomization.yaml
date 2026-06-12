@@ -2,4 +2,6 @@
 resources:
 - runners_v1alpha1_runner.yaml
 - runners_v1alpha1_workflow.yaml
+- runners_v1alpha1_runner_git.yaml
+- runners_v1alpha1_workflow_git.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

@@ -93,6 +93,12 @@ type WorkflowStep struct {
 	// Timeout for this step.
 	// +optional
 	Timeout *metav1.Duration `json:"timeout,omitempty"`
+
+	// GitRepo defines a Git repository to clone before executing the step.
+	// When set, an init container clones the repo into a shared volume and the
+	// main container's working directory is set to the checkout path.
+	// +optional
+	GitRepo *GitRepo `json:"gitRepo,omitempty"`
 }
 
 // WorkflowSpec defines the desired state of Workflow.
