@@ -126,19 +126,14 @@ func (r *RunnerReconciler) buildJob(runner *runnersv1alpha1.Runner, jobName, spe
 					},
 					Containers: []corev1.Container{
 						{
-							Name:      "runner",
-							Image:     runner.Spec.Image,
-							Env:       runner.Spec.Env,
-							EnvFrom:   runner.Spec.EnvFrom,
-							Args:      runner.Spec.Args,
-							Command:   runner.Spec.Command,
-							Resources: runner.Spec.Resources,
-							VolumeMounts: func() []corev1.VolumeMount {
-								if len(runner.Spec.Mounts) > 0 {
-									return runner.Spec.Mounts
-								}
-								return nil
-							}(),
+							Name:         "runner",
+							Image:        runner.Spec.Image,
+							Env:          runner.Spec.Env,
+							EnvFrom:      runner.Spec.EnvFrom,
+							Args:         runner.Spec.Args,
+							Command:      runner.Spec.Command,
+							Resources:    runner.Spec.Resources,
+							VolumeMounts: runner.Spec.Mounts,
 							SecurityContext: &corev1.SecurityContext{
 								AllowPrivilegeEscalation: ptr.To(false),
 								ReadOnlyRootFilesystem:   ptr.To(true),
@@ -148,12 +143,7 @@ func (r *RunnerReconciler) buildJob(runner *runnersv1alpha1.Runner, jobName, spe
 							},
 						},
 					},
-					Volumes: func() []corev1.Volume {
-						if len(runner.Spec.Volumes) > 0 {
-							return runner.Spec.Volumes
-						}
-						return nil
-					}(),
+					Volumes: runner.Spec.Volumes,
 				},
 			},
 		},

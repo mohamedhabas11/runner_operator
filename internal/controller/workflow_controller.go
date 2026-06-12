@@ -255,7 +255,9 @@ func (r *WorkflowReconciler) buildStepRunner(ctx context.Context, wf *runnersv1a
 				spec.TimeoutAfter = step.Timeout
 			}
 		} else {
-			spec.Image = step.RunnerRef.Name
+			stepRef := fmt.Sprintf("%s/%s", wf.Namespace, step.RunnerRef.Name)
+			log.FromContext(ctx).Error(err, "RunnerRef not found, using default image", "runnerRef", stepRef)
+			spec.Image = "busybox:latest"
 		}
 	} else {
 		spec.Image = "busybox:latest"
