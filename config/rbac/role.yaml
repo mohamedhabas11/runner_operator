@@ -1,0 +1,61 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - batch
+  resources:
+  - jobs/status
+  verbs:
+  - get
+- apiGroups:
+  - runners.runner-operator.io
+  resources:
+  - runners
+  - workflows
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - runners.runner-operator.io
+  resources:
+  - runners/finalizers
+  - workflows/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - runners.runner-operator.io
+  resources:
+  - runners/status
+  - workflows/status
+  verbs:
+  - get
+  - patch
+  - update

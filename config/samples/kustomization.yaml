@@ -1,0 +1,5 @@
+## Append samples of your project ##
+resources:
+- runners_v1alpha1_runner.yaml
+- runners_v1alpha1_workflow.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

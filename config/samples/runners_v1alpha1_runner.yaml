@@ -1,0 +1,11 @@
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Runner
+metadata:
+  name: runner-sample
+spec:
+  image: busybox:latest
+  args: ["sh", "-c", "echo hello && sleep 5"]
+  env:
+    - name: MY_VAR
+      value: "hello"
+  timeoutAfter: "1h"

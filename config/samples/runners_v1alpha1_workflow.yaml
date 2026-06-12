@@ -1,0 +1,28 @@
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Workflow
+metadata:
+  name: workflow-sample
+spec:
+  timeout: "2h"
+  steps:
+    - name: build
+      image: busybox:latest
+      command: ["sh", "-c"]
+      args: ["echo building && sleep 2"]
+      timeout: "10m"
+    - name: test
+      image: busybox:latest
+      command: ["sh", "-c"]
+      args: ["echo testing && sleep 2"]
+      dependsOn: ["build"]
+      when: "on_success"
+      retry:
+        maxRetries: 2
+        backoff:
+          initialDelay: 5s
+    - name: deploy
+      image: busybox:latest
+      command: ["sh", "-c"]
+      args: ["echo deploying && sleep 2"]
+      dependsOn: ["test"]
+      when: "on_success"
