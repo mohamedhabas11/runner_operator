@@ -17,8 +17,10 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	runnersv1alpha1 "github.com/mohamedhabas11/runner_operator/api/v1alpha1"
@@ -38,6 +40,7 @@ type RouteConfig struct {
 // Server is an HTTP server that receives external webhooks and creates Workflow CRs.
 type Server struct {
 	client client.Client
+	scheme *runtime.Scheme
 
 	mu       sync.RWMutex
 	routes   map[string]*RouteConfig
@@ -83,9 +86,10 @@ func (rc *rateCounter) allow(maxPerMinute int) bool {
 }
 
 // NewServer creates a new webhook event server.
-func NewServer(cl client.Client, port string) *Server {
+func NewServer(cl client.Client, scheme *runtime.Scheme, port string) *Server {
 	return &Server{
 		client:   cl,
+		scheme:   scheme,
 		routes:   make(map[string]*RouteConfig),
 		rateData: make(map[string]*rateCounter),
 		port:     port,
@@ -326,6 +330,11 @@ func (s *Server) createWorkflow(ctx context.Context, trigger runnersv1alpha1.Eve
 				Value: v,
 			})
 		}
+	}
+
+	// Set owner reference so workflow is garbage collected when trigger is deleted
+	if err := controllerutil.SetControllerReference(&trigger, workflow, s.scheme); err != nil {
+		return fmt.Errorf("failed to set owner reference: %w", err)
 	}
 
 	if err := s.client.Create(ctx, workflow); err != nil {

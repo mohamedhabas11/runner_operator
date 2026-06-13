@@ -43,9 +43,11 @@ var _ = Describe("EventTrigger Controller", func() {
 			Namespace: "default",
 		}
 		eventtrigger := &runnersv1alpha1.EventTrigger{}
-		webhookSrv := events.NewServer(k8sClient, "0")
+		var webhookSrv *events.Server
 
 		BeforeEach(func() {
+			webhookSrv = events.NewServer(k8sClient, k8sClient.Scheme(), "0")
+
 			By("creating the custom resource for the Kind EventTrigger")
 			err := k8sClient.Get(ctx, typeNamespacedName, eventtrigger)
 			if err != nil && errors.IsNotFound(err) {

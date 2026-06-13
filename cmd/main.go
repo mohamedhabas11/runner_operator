@@ -193,7 +193,7 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "workflow")
 		os.Exit(1)
 	}
-	webhookSrv := events.NewServer(mgr.GetClient(), webhookEventAddr)
+	webhookSrv := events.NewServer(mgr.GetClient(), mgr.GetScheme(), webhookEventAddr)
 
 	if err := (&controller.EventTriggerReconciler{
 		Client:     mgr.GetClient(),

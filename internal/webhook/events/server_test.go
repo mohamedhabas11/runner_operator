@@ -8,6 +8,11 @@ import (
 	"testing"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
 	runnersv1alpha1 "github.com/mohamedhabas11/runner_operator/api/v1alpha1"
 )
 
@@ -214,4 +219,84 @@ func TestPayloadRoundTrip(t *testing.T) {
 	if pr["title"] != "Test PR" {
 		t.Errorf("pr.title = %q, want %q", pr["title"], "Test PR")
 	}
+}
+
+func TestCreateWorkflowSetsOwnerReference(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := runnersv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+
+	trigger := runnersv1alpha1.EventTrigger{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-trigger",
+			Namespace: "test-ns",
+			UID:       "abc-123-def",
+		},
+		Spec: runnersv1alpha1.EventTriggerSpec{
+			WorkflowTemplate: runnersv1alpha1.WorkflowTemplateRef{
+				Name:      "test-template",
+				Namespace: "test-ns",
+			},
+		},
+	}
+
+	template := &runnersv1alpha1.Workflow{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-template",
+			Namespace: "test-ns",
+		},
+		Spec: runnersv1alpha1.WorkflowSpec{
+			Steps: []runnersv1alpha1.WorkflowStep{
+				{Name: "step-1", Image: "busybox", Command: []string{"echo", "hello"}},
+			},
+		},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(template).
+		Build()
+
+	srv := NewServer(cl, scheme, ":0")
+
+	params := map[string]string{"FOO": "bar"}
+	if err := srv.createWorkflow(t.Context(), trigger, params); err != nil {
+		t.Fatalf("createWorkflow failed: %v", err)
+	}
+
+	created := &runnersv1alpha1.WorkflowList{}
+	if err := cl.List(t.Context(), created, client.InNamespace("test-ns")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Filter out the template (we want the dynamically created one)
+	var wf *runnersv1alpha1.Workflow
+	for i := range created.Items {
+		if created.Items[i].GenerateName != "" {
+			wf = &created.Items[i]
+			break
+		}
+	}
+	if wf == nil {
+		t.Fatal("expected a generated workflow, found none")
+	}
+	if len(wf.OwnerReferences) != 1 {
+		t.Fatalf("expected 1 owner reference, got %d", len(wf.OwnerReferences))
+	}
+
+	ref := wf.OwnerReferences[0]
+	if ref.Name != "test-trigger" {
+		t.Errorf("owner ref name = %q, want %q", ref.Name, "test-trigger")
+	}
+	if ref.Kind != "EventTrigger" {
+		t.Errorf("owner ref kind = %q, want %q", ref.Kind, "EventTrigger")
+	}
+	if !ptrToTrue(ref.Controller) {
+		t.Error("expected owner ref to be controller")
+	}
+}
+
+func ptrToTrue(b *bool) bool {
+	return b != nil && *b
 }
