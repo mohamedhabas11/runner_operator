@@ -2,6 +2,48 @@
 
 ## Session Log
 
+### Session 12 — Cross-Namespace Fixes & Release Workflow Hardening
+
+**Work Done:**
+- **Session 10 P1 items (all 4):**
+  - fetch-depth: changed 0 → 1 + explicit `git fetch --tags`
+  - Release notes: added `--no-merges` to `git log`
+  - gh-pages: added branch existence check before worktree; removed `|| true` masking
+  - URLs: parameterized all hardcoded GitHub URLs via `$GITHUB_REPOSITORY` in release workflow
+- **Session 10 P2 (5 of 8):**
+  - Verified ingress file exists
+  - Fixed NetworkPolicy CIDR docs with pod CIDR note + broader RFC 1918 ranges
+  - Corrected CRD preserveUnknownFields doc (default prunes, not preserves)
+  - Added `kubectl logs` alternative to stern
+  - Updated runnerRef CRD table to new RunnerRef type
+- **Session 11 P0 (2 of 3):**
+  - RunnerRef: new custom type with Name+Namespace, cross-namespace resolution in controller
+  - AllowedNamespaces: enforced in webhook server + controller with status/events
+  - Validation webhook: deferred (requires cert-manager scaffold)
+- **Session 11 P1 (1 of 4):**
+  - Webhook server RBAC: added namespace read permission
+
+**Files modified:**
+- `.github/workflows/release-chart.yaml` — 4 improvements
+- `api/v1alpha1/workflow_types.go` — new RunnerRef type, updated WorkflowStep field
+- `internal/controller/workflow_controller.go` — cross-namespace resolution in buildStepRunner
+- `internal/webhook/events/server.go` — AllowedNamespaces enforcement in createWorkflow
+- `internal/controller/eventtrigger_controller.go` — AllowedNamespaces enforcement + RBAC marker
+- `README.md` — CRD table update, NetworkPolicy docs, preserveUnknownFields fix, stern alternative
+- `config/crd/bases/` — regenerated (RunnerRef schema change)
+- `config/rbac/role.yaml` — regenerated (namespace RBAC marker)
+- `api/v1alpha1/eventtrigger_types.go` — removed `omitempty` from `Registered bool` (was swallowing `false` in JSON patches)
+- `api/v1alpha1/zz_generated.deepcopy.go` — regenerated (RunnerRef DeepCopy)
+- `test/e2e/e2e_test.go` — RunnerRefCrossNamespace + AllowedNamespaces test contexts
+
+**Verification:**
+- `make test` — passing
+- `make lint-fix` — 0 issues
+- `go build ./...` — OK
+- **`make test-e2e` — 11/11 specs passing** (RunnerRefCrossNamespace + AllowedNamespaces now green after `omitempty` fix)
+
+---
+
 ### Session 1 — Project Scaffolding & CRDs
 
 **Work Done:**
@@ -145,10 +187,36 @@
 
 ## Deferred / Skipped
 
-### P2 — Nice to Have
+### Session 11 P0
 
-- [ ] **Improve Conditions** — Add Reason/Message to status conditions for better observability. Low priority; functional behavior unchanged.
-- [ ] **Topological sort of steps** — Process steps in dependency order, not slice order.
+- [ ] **Add namespace validation webhook** — Requires cert-manager + admission webhook TLS + kubebuilder scaffold. Separate session.
+
+### Session 11 P1
+
+- [ ] **EventTrigger workflow ownership** — `controllerutil.SetControllerReference` for webhook-created workflows
+- [ ] **Cross-namespace template workflow** — Decide template vs trigger namespace for workflow creation
+- [ ] **SharedVolume PVC cross-namespace** — Document PVC scope limitations
+- [ ] **Webhook server RBAC** — Done (namespace read permission added)
+
+### Session 11 P2
+
+- [ ] **Namespace quotas** — Integrate with ResourceQuota
+- [ ] **Tenant-aware metrics** — Add `namespace` label
+- [ ] **Network isolation** — Namespace network policies
+- [ ] **Audit logging** — Log cross-namespace operations with tenant identity
+
+### Session 10 P2 — Not Done
+
+- [ ] **Add CI check for README examples** — Use `kubeconform` or `kubectl apply --dry-run=client`
+- [ ] **Add markdownlint/vale check** — For documentation consistency
+
+### Other
+
+- [ ] **Improve Conditions** — Add Reason/Message to status conditions for better observability
+- [ ] **Topological sort of steps** — Process steps in dependency order, not slice order
+- [ ] **`gitRepo.Path` implementation** — Currently defined in `runner_types.go` but ignored in `buildGitInitContainer`
+- [ ] **Expose `--webhook-event-port`** — Currently hardcoded 8080 in `cmd/main.go`
+- [ ] **Dependabot config** — GitHub Actions version updates
 
 ---
 
@@ -219,21 +287,20 @@
 **Work Done:**
 - Reviewed commits 7de5dec (release workflow), 91602e1 (kustomization), 2484058 (README)
 
-### P1 — Important
+### P1 — Important ✓
 
-- [ ] **Release workflow: fetch-depth optimization** — Change `fetch-depth: 0` to `fetch-depth: 1` + `git fetch --tags` in `.github/workflows/release-chart.yaml:16` for performance
-- [ ] **Release workflow: clean release notes** — Add `--no-merges` to `git log` in release notes generation (lines 33-59)
-- [ ] **Release workflow: gh-pages error handling** — Add explicit check for `gh-pages` branch existence before worktree operations (lines 72-77); remove `|| true` masking
-- [ ] **README: parameterize GitHub URLs** — Replace hardcoded `mohamedhabas11/runner_operator` with variable/pattern in README.md and release workflow
+- [x] **Release workflow: fetch-depth optimization** — Changed `fetch-depth: 0` to `fetch-depth: 1` + `git fetch --tags` in `.github/workflows/release-chart.yaml:15-20`
+- [x] **Release workflow: clean release notes** — Added `--no-merges` to `git log` in release notes generation (lines 61, 63)
+- [x] **Release workflow: gh-pages error handling** — Added explicit `git ls-remote --exit-code` check for gh-pages branch before worktree; replaced `|| true` with proper `git diff --cached --quiet` guard
+- [x] **Release workflow + README: parameterize GitHub URLs** — Replaced hardcoded `mohamedhabas11/runner_operator` with `$OWNER/$REPO` from `GITHUB_REPOSITORY` env var
 
 ### P2 — Nice to Have
 
-- [ ] **README: verify ingress example file** — Confirm `config/webhook/ingress.yaml` exists or add note to create it (README.md:421-423)
-- [ ] **README: fix NetworkPolicy CIDR** — Make `10.0.0.0/8` block configurable or add note about pod CIDR assumption (README.md:520-523)
-- [ ] **README: verify CRD preserveUnknownFields** — Check `config/crd/bases/` for actual value; kubebuilder v4 defaults to `true` (README.md:534-535)
-- [ ] **README: verify Prometheus alert labels** — Confirm `controller="runner"` matches actual controller-runtime metric labels (README.md:561-563)
-- [ ] **README: note stern as optional** — Add `kubectl logs` alternative (README.md:572)
-- [ ] **README: verify CRD group/version in examples** — Cross-reference with `api/v1alpha1/*_types.go`
+- [x] **README: verify ingress example file** — `config/webhook/ingress.yaml` exists ✅
+- [x] **README: fix NetworkPolicy CIDR** — Added pod CIDR note and broadened `except` list to include all RFC 1918 ranges
+- [x] **README: fix CRD preserveUnknownFields doc** — Corrected statement: structural schemas prune unknown fields by default; added workaround note
+- [x] **README: note stern as optional** — Added `kubectl logs` alternative for controller logs
+- [x] **README: update runnerRef CRD docs** — Changed from `LocalObjectReference` to new `RunnerRef` type (name + namespace)
 - [ ] **Add CI check for README examples** — Use `kubeconform` or `kubectl apply --dry-run=client` to catch drift
 - [ ] **Add markdownlint/vale check** — For documentation consistency
 
@@ -247,16 +314,16 @@
 
 ### P0 — Critical (Incorrectness)
 
-- [ ] **RunnerRef: add Namespace field** — Change `RunnerRef *corev1.LocalObjectReference` to a custom type with `Name`+`Namespace` in `api/v1alpha1/workflow_types.go:62`. Update `buildStepRunner` at `internal/controller/workflow_controller.go:359` to resolve cross-namespace. Regenerate CRD with `make manifests generate`.
-- [ ] **Enforce AllowedNamespaces** — In `internal/webhook/events/server.go:createWorkflow` (line 282), check `trigger.Spec.AllowedNamespaces` before creating workflow. If non-empty and `trigger.Namespace` not in list, reject with error. Also enforce in `EventTriggerReconciler.Reconcile`.
-- [ ] **Add namespace validation webhook** — Create `ValidatingWebhookConfiguration` for EventTrigger that validates `WorkflowTemplate.Namespace` exists and is accessible.
+- [x] **RunnerRef: add Namespace field** — Changed `RunnerRef *corev1.LocalObjectReference` to custom `RunnerRef` type with `Name`+`Namespace` in `api/v1alpha1/workflow_types.go:62`. Updated `buildStepRunner` at `internal/controller/workflow_controller.go:359` to resolve cross-namespace. CRD regenerated with `make manifests generate`.
+- [x] **Enforce AllowedNamespaces** — Added check in `internal/webhook/events/server.go:createWorkflow` (rejects if trigger namespace not in allowed list). Added enforcement in `EventTriggerReconciler.Reconcile` with status patch and event. Added RBAC marker for namespace read.
+- [ ] **Add namespace validation webhook** — Deferred. Requires cert-manager + admission webhook TLS + kubebuilder scaffold. Needs separate session. See Deferred section.
 
 ### P1 — Important (Robustness)
 
 - [ ] **EventTrigger workflow ownership** — In `server.go:createWorkflow`, set `controllerutil.SetControllerReference(trigger, workflow, scheme)` so deleting an EventTrigger cleans up created workflows. Requires trigger and workflow in same namespace.
 - [ ] **Cross-namespace template workflow** — Decide: create workflow in template namespace (for reuse) or trigger namespace (for isolation). Document decision. If template namespace, update `server.go:299`.
 - [ ] **SharedVolume PVC cross-namespace** — Document that PVC references are namespace-scoped. For cross-namespace job grouping, use EmptyDir or CSI-driven cross-namespace volumes.
-- [ ] **Webhook server RBAC** — Ensure `ClusterRole` allows workflow creation in all target namespaces. Add explicit RBAC for `AllowedNamespaces` if needed.
+- [x] **Webhook server RBAC** — Added `// +kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;list;watch` to EventTrigger controller. Generated ClusterRole updated.
 
 ### P2 — Nice to Have (Operational)
 

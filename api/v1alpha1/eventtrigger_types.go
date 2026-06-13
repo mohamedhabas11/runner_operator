@@ -114,7 +114,8 @@ type EventTriggerStatus struct {
 
 	// Registered indicates whether the webhook route is currently registered.
 	// +optional
-	Registered bool `json:"registered,omitempty"`
+	// +kubebuilder:default=false
+	Registered bool `json:"registered"`
 }
 
 // +kubebuilder:object:root=true

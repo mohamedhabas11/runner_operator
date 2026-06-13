@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -280,6 +281,13 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createWorkflow(ctx context.Context, trigger runnersv1alpha1.EventTrigger, params map[string]string) error {
+	if len(trigger.Spec.AllowedNamespaces) > 0 {
+		allowed := slices.Contains(trigger.Spec.AllowedNamespaces, trigger.Namespace)
+		if !allowed {
+			return fmt.Errorf("trigger namespace %s not in allowed namespaces", trigger.Namespace)
+		}
+	}
+
 	ns := trigger.Namespace
 	if trigger.Spec.WorkflowTemplate.Namespace != "" {
 		ns = trigger.Spec.WorkflowTemplate.Namespace

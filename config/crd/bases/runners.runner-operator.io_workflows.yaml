@@ -574,20 +574,20 @@ spec:
                             - maxRetries
                             type: object
                           runnerRef:
-                            description: RunnerRef references a Runner resource to
-                              use as a template.
+                            description: |-
+                              RunnerRef references a Runner resource to use as a template.
+                              Namespace defaults to the workflow's namespace when empty.
                             properties:
                               name:
-                                default: ""
-                                description: |-
-                                  Name of the referent.
-                                  This field is effectively required, but due to backwards compatibility is
-                                  allowed to be empty. Instances of this type with an empty value here are
-                                  almost certainly wrong.
-                                  More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                description: Name of the Runner resource.
                                 type: string
+                              namespace:
+                                description: Namespace of the Runner resource. Defaults
+                                  to the workflow's namespace.
+                                type: string
+                            required:
+                            - name
                             type: object
-                            x-kubernetes-map-type: atomic
                           timeout:
                             description: Timeout for this step.
                             type: string
@@ -871,20 +871,20 @@ spec:
                       - maxRetries
                       type: object
                     runnerRef:
-                      description: RunnerRef references a Runner resource to use as
-                        a template.
+                      description: |-
+                        RunnerRef references a Runner resource to use as a template.
+                        Namespace defaults to the workflow's namespace when empty.
                       properties:
                         name:
-                          default: ""
-                          description: |-
-                            Name of the referent.
-                            This field is effectively required, but due to backwards compatibility is
-                            allowed to be empty. Instances of this type with an empty value here are
-                            almost certainly wrong.
-                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          description: Name of the Runner resource.
                           type: string
+                        namespace:
+                          description: Namespace of the Runner resource. Defaults
+                            to the workflow's namespace.
+                          type: string
+                      required:
+                      - name
                       type: object
-                      x-kubernetes-map-type: atomic
                     timeout:
                       description: Timeout for this step.
                       type: string

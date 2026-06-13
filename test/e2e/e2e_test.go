@@ -22,6 +22,8 @@ const namespace = "runner-operator-system"
 
 const testNamespace = "runner-operator-test"
 
+const templateNamespace = "runner-operator-templates"
+
 const serviceAccountName = "runner-operator-controller-manager"
 
 const metricsServiceName = "runner-operator-controller-manager-metrics-service"
@@ -57,6 +59,11 @@ var _ = Describe("Manager", Ordered, func() {
 		cmd = exec.Command("kubectl", "create", "ns", testNamespace)
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to create test namespace")
+
+		By("creating template namespace for cross-namespace tests")
+		cmd = exec.Command("kubectl", "create", "ns", templateNamespace)
+		_, err = utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred(), "Failed to create template namespace")
 	})
 
 	AfterAll(func() {
@@ -76,6 +83,10 @@ var _ = Describe("Manager", Ordered, func() {
 
 		By("uninstalling CRDs")
 		cmd = exec.Command("make", "uninstall")
+		_, _ = utils.Run(cmd)
+
+		By("removing template namespace")
+		cmd = exec.Command("kubectl", "delete", "ns", templateNamespace, "--ignore-not-found")
 		_, _ = utils.Run(cmd)
 
 		By("removing manager namespace")
@@ -710,6 +721,145 @@ spec:
 				g.Expect(output).NotTo(BeEmpty())
 			}
 			Eventually(verifyCompletionTime).Should(Succeed())
+		})
+	})
+
+	Context("RunnerRefCrossNamespace", Ordered, func() {
+		const templateName = "e2e-runner-template"
+		const wfName = "e2e-wf-cross-ns"
+
+		AfterAll(func() {
+			By("deleting the Workflow resource")
+			cmd := exec.Command("kubectl", "delete", "workflow", wfName, "-n", testNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+
+			By("deleting the Runner template")
+			cmd = exec.Command("kubectl", "delete", "runner", templateName, "-n", templateNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+
+			By("deleting any Runner resources created by the Workflow")
+			cmd = exec.Command("kubectl", "delete", "runner", "-l",
+				"runner-operator.io/workflow="+wfName, "-n", testNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should use a Runner template from another namespace", func() {
+			By("creating a Runner template in the template namespace")
+			applyTemplate := fmt.Sprintf(`
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Runner
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  image: busybox:latest
+  command: ["sh", "-c"]
+  args: ["echo 'cross-namespace template' && sleep 1"]
+  timeoutAfter: "30s"
+`, templateName, templateNamespace)
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(applyTemplate)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create Runner template")
+
+			By("creating a Workflow in the test namespace that references the Runner template by name+namespace")
+			applyWorkflow := fmt.Sprintf(`
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Workflow
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  steps:
+    - name: cross-step
+      runnerRef:
+        name: %s
+        namespace: %s
+      timeout: "30s"
+`, wfName, testNamespace, templateName, templateNamespace)
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(applyWorkflow)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to apply Workflow")
+
+			By("waiting for the step Runner to be created")
+			stepRunner := fmt.Sprintf("%s-cross-step", wfName)
+			verifyRunnerCreated := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "runner", stepRunner, "-n", testNamespace,
+					"-o", "jsonpath={.metadata.name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal(stepRunner))
+			}
+			Eventually(verifyRunnerCreated).Should(Succeed())
+
+			By("waiting for the step to succeed")
+			verifyRunnerSucceeded := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "runner", stepRunner, "-n", testNamespace,
+					"-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Succeeded"))
+			}
+			Eventually(verifyRunnerSucceeded, 30*time.Second).Should(Succeed())
+
+			By("verifying the Workflow status is Succeeded")
+			verifyWorkflowSucceeded := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "workflow", wfName, "-n", testNamespace,
+					"-o", "jsonpath={.status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Succeeded"))
+			}
+			Eventually(verifyWorkflowSucceeded).Should(Succeed())
+		})
+	})
+
+	Context("AllowedNamespaces", Ordered, func() {
+		const triggerName = "e2e-allowed-ns-trigger"
+
+		AfterAll(func() {
+			By("deleting the EventTrigger resource")
+			cmd := exec.Command("kubectl", "delete", "eventtrigger", triggerName, "-n", testNamespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should reject triggers whose namespace is not in allowedNamespaces", func() {
+			By("creating an EventTrigger with allowedNamespaces that excludes its own namespace")
+			applyTrigger := fmt.Sprintf(`
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: EventTrigger
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  webhook:
+    path: /webhooks/e2e-allowed-ns-test
+  workflowTemplate:
+    name: dummy-template
+  allowedNamespaces:
+    - other-namespace
+`, triggerName, testNamespace)
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(applyTrigger)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to apply EventTrigger")
+
+			By("verifying the trigger status shows registered=false and lastError is set")
+			verifyNotRegistered := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "eventtrigger", triggerName, "-n", testNamespace,
+					"-o", "jsonpath={.status.registered}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("false"))
+
+				cmd = exec.Command("kubectl", "get", "eventtrigger", triggerName, "-n", testNamespace,
+					"-o", "jsonpath={.status.lastError}")
+				output, err = utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(ContainSubstring("not in allowedNamespaces"))
+			}
+			Eventually(verifyNotRegistered).Should(Succeed())
 		})
 	})
 

@@ -355,8 +355,11 @@ func (r *WorkflowReconciler) buildStepRunner(ctx context.Context, wf *runnersv1a
 		spec.Image = step.Image
 	} else if step.RunnerRef != nil {
 		template := &runnersv1alpha1.Runner{}
-		var err error
-		if err = r.Get(ctx, types.NamespacedName{Name: step.RunnerRef.Name, Namespace: wf.Namespace}, template); err == nil {
+		ns := wf.Namespace
+		if step.RunnerRef.Namespace != "" {
+			ns = step.RunnerRef.Namespace
+		}
+		if err := r.Get(ctx, types.NamespacedName{Name: step.RunnerRef.Name, Namespace: ns}, template); err == nil {
 			spec = *template.Spec.DeepCopy()
 			if step.Command != nil {
 				spec.Command = step.Command
@@ -374,7 +377,7 @@ func (r *WorkflowReconciler) buildStepRunner(ctx context.Context, wf *runnersv1a
 				spec.GitRepo = step.GitRepo
 			}
 		} else {
-			stepRef := fmt.Sprintf("%s/%s", wf.Namespace, step.RunnerRef.Name)
+			stepRef := fmt.Sprintf("%s/%s", ns, step.RunnerRef.Name)
 			log.FromContext(ctx).Error(err, "RunnerRef not found, using default image", "runnerRef", stepRef)
 			spec.Image = "busybox:latest"
 		}

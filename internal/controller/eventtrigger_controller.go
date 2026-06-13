@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -42,6 +43,7 @@ type EventTriggerReconciler struct {
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=eventtriggers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=eventtriggers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=workflows,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
@@ -60,6 +62,22 @@ func (r *EventTriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			logger.Info("Deregistered webhook route", "path", trigger.Spec.Webhook.Path)
 		}
 		return ctrl.Result{}, nil
+	}
+
+	if len(trigger.Spec.AllowedNamespaces) > 0 {
+		allowed := slices.Contains(trigger.Spec.AllowedNamespaces, trigger.Namespace)
+		if !allowed {
+			logger.Info("Trigger namespace not in allowed namespaces", "namespace", trigger.Namespace)
+			r.Recorder.Eventf(trigger, corev1.EventTypeWarning, "NamespaceNotAllowed",
+				"Trigger namespace %s is not in allowedNamespaces", trigger.Namespace)
+			patchBase := client.MergeFrom(trigger.DeepCopy())
+			trigger.Status.Registered = false
+			trigger.Status.LastError = fmt.Sprintf("namespace %s not in allowedNamespaces", trigger.Namespace)
+			if err := r.Status().Patch(ctx, trigger, patchBase); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, nil
+		}
 	}
 
 	patchBase := client.MergeFrom(trigger.DeepCopy())

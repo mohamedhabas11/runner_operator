@@ -14,7 +14,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
+
+      - name: Fetch tags for release notes
+        run: git fetch --tags
 
       - uses: azure/setup-helm@v4
 
@@ -29,6 +32,8 @@ jobs:
 
       - name: Generate release notes
         run: |
+          OWNER="${GITHUB_REPOSITORY%/*}"
+          REPO="${GITHUB_REPOSITORY#*/}"
           PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
           cat > /tmp/release-notes.md << NOTEEND
           ## runner-operator ${GITHUB_REF_NAME}
@@ -39,23 +44,23 @@ jobs:
           If this release includes CRD schema changes, apply them first:
 
           \`\`\`
-          kubectl apply --server-side -f https://raw.githubusercontent.com/mohamedhabas11/runner_operator/${GITHUB_REF_NAME}/config/crd/bases/
+          kubectl apply --server-side -f https://raw.githubusercontent.com/${OWNER}/${REPO}/${GITHUB_REF_NAME}/config/crd/bases/
           \`\`\`
 
           Then proceed with the Helm upgrade:
 
           \`\`\`
-          helm repo update runner-operator
-          helm upgrade runner-operator runner-operator/runner-operator
+          helm repo update ${REPO}
+          helm upgrade runner-operator ${REPO}/runner-operator
           \`\`\`
 
           ### Changes
 
           NOTEEND
           if [ -n "$PREV_TAG" ]; then
-            git log "${PREV_TAG}..HEAD" --oneline >> /tmp/release-notes.md
+            git log "${PREV_TAG}..HEAD" --oneline --no-merges >> /tmp/release-notes.md
           else
-            git log --oneline -30 >> /tmp/release-notes.md
+            git log --oneline --no-merges -30 >> /tmp/release-notes.md
           fi
 
       - name: Create GitHub Release
@@ -69,28 +74,44 @@ jobs:
 
       - name: Publish chart to GitHub Pages
         run: |
+          OWNER="${GITHUB_REPOSITORY%/*}"
+          REPO="${GITHUB_REPOSITORY#*/}"
+          CHART_URL="https://${OWNER}.github.io/${REPO}"
+
+          if ! git ls-remote --exit-code origin gh-pages > /dev/null 2>&1; then
+            echo "gh-pages branch does not exist; creating orphan branch"
+            git checkout --orphan gh-pages
+            git reset --hard
+            rm -rf .release-packages
+            git commit --allow-empty -m "Initial gh-pages branch"
+            git push origin gh-pages
+            git checkout "${GITHUB_REF_NAME}"
+          fi
+
           git fetch origin gh-pages
           git worktree add /tmp/gh-pages gh-pages
 
-          # Copy chart package next to index.yaml
           cp .release-packages/runner-operator-*.tgz /tmp/gh-pages/
 
-          # Regenerate index, merging with existing entries
           if [ -f /tmp/gh-pages/index.yaml ]; then
             helm repo index /tmp/gh-pages/ \
-              --url https://mohamedhabas11.github.io/runner_operator \
+              --url "${CHART_URL}" \
               --merge /tmp/gh-pages/index.yaml
           else
             helm repo index /tmp/gh-pages/ \
-              --url https://mohamedhabas11.github.io/runner_operator
+              --url "${CHART_URL}"
           fi
 
           cd /tmp/gh-pages
           git add .
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit -m "Release ${GITHUB_REF_NAME}" || true
-          git push origin gh-pages
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Release ${GITHUB_REF_NAME}"
+            git push origin gh-pages
+          fi
 
           git worktree remove /tmp/gh-pages
         env:

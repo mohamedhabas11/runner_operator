@@ -40,6 +40,18 @@ type RetryPolicy struct {
 	Backoff *BackoffConfig `json:"backoff,omitempty"`
 }
 
+// RunnerRef references a Runner resource to use as a workflow step template.
+// Namespace defaults to the workflow's namespace when empty.
+type RunnerRef struct {
+	// Name of the Runner resource.
+	// +required
+	Name string `json:"name"`
+
+	// Namespace of the Runner resource. Defaults to the workflow's namespace.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+}
+
 // BackoffConfig defines backoff parameters for retries.
 type BackoffConfig struct {
 	// InitialDelay between retry attempts.
@@ -58,8 +70,9 @@ type WorkflowStep struct {
 	Name string `json:"name"`
 
 	// RunnerRef references a Runner resource to use as a template.
+	// Namespace defaults to the workflow's namespace when empty.
 	// +optional
-	RunnerRef *corev1.LocalObjectReference `json:"runnerRef,omitempty"`
+	RunnerRef *RunnerRef `json:"runnerRef,omitempty"`
 
 	// Image is the Docker image to run (inline alternative to RunnerRef).
 	// +optional

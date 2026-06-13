@@ -102,7 +102,8 @@ pod layouts, state machines, and design decisions.
 | `retry.backoff.initialDelay` | `metav1.Duration` | yes* | First retry delay |
 | `retry.backoff.maxDelay` | `metav1.Duration` | no | Cap on retry delay |
 | `timeout` | `metav1.Duration` | no | Per-step timeout |
-| `runnerRef` | `LocalObjectReference` | no | Reference existing Runner as template |
+| `runnerRef.name` | `string` | yes* | Name of Runner template |
+| `runnerRef.namespace` | `string` | no | Runner namespace (defaults to workflow's) |
 
 **JobSpec additional fields:**
 
@@ -576,7 +577,11 @@ The chart applies these defaults (Kubernetes Pod Security Standards
 ### Namespace Isolation
 
 Runner pods run in the same namespace as their Runner CR. Use
-Kubernetes NetworkPolicies to restrict egress:
+Kubernetes NetworkPolicies to restrict egress.
+
+> **Pod CIDR note:** The `10.0.0.0/8` block below assumes your cluster
+> Pod/Service CIDR uses RFC 1918 space. Adjust the `except` list to
+> match your cluster's actual CIDR ranges (`kubectl get nodes -o jsonpath='{.spec.podCIDR}'`).
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -592,7 +597,9 @@ spec:
         - ipBlock:
             cidr: 0.0.0.0/0
             except:
-              - 10.0.0.0/8    # block internal RFC 1918
+              - 10.0.0.0/8    # adjust to your cluster's CIDR
+              - 172.16.0.0/12
+              - 192.168.0.0/16
 ```
 
 ### Upgrading
@@ -605,9 +612,10 @@ helm upgrade runner-operator runner-operator/runner-operator \
   --namespace runner-operator-system
 ```
 
-Kubebuilder-generated CRDs evolve schema but do not prune unknown fields
-(`spec.preserveUnknownFields: false` is not set), so existing CR objects
-with old fields remain valid.
+Kubebuilder-generated CRDs use structural schemas. Unknown fields on
+existing CR objects are pruned by the API server (K8s 1.16+). If you
+need backward compatibility with old fields, preserve them via
+`spec.preserveUnknownFields` in a manual CRD patch.
 
 ---
 
@@ -658,8 +666,11 @@ helm upgrade runner-operator runner-operator/runner-operator \
 ### Logs
 
 ```bash
-# Controller logs
+# Controller logs (requires stern; alternatively use kubectl below)
 stern -n runner-operator-system -l control-plane=controller-manager
+
+# Alternative without stern:
+kubectl -n runner-operator-system logs deployment/runner-operator-controller-manager -c manager --tail=100 -f
 
 # Runner pod logs (stdout of the user's image)
 kubectl logs -l runner-operator.io/runner=<runner-name> --all-containers
