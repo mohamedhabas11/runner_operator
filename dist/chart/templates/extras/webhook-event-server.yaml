@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "runner-operator.name" . }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  name: {{ include "runner-operator.resourceName" (dict "suffix" "webhook-event-server" "context" $) }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  ports:
+  - name: webhook-event
+    port: 80
+    protocol: TCP
+    targetPort: webhook-event
+  selector:
+    app.kubernetes.io/name: {{ include "runner-operator.name" . }}
+    control-plane: controller-manager

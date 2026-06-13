@@ -1,0 +1,28 @@
+apiVersion: v2
+name: runner-operator
+description: |
+  runner-operator is a Kubernetes operator that runs arbitrary OCI container
+  images as disposable Jobs and orchestrates multi-step CI/CD pipelines with
+  DAG-based Workflows.
+type: application
+
+version: 0.1.0
+appVersion: "0.1.0"
+
+home: https://github.com/mohamedhabas11/runner_operator
+sources:
+  - https://github.com/mohamedhabas11/runner_operator
+
+maintainers:
+  - name: mohamedhabas11
+    url: https://github.com/mohamedhabas11
+
+keywords:
+  - kubernetes
+  - operator
+  - ci
+  - cd
+  - runner
+
+annotations:
+  kubebuilder.io/generated-by: kubebuilder

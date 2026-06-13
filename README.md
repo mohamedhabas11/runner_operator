@@ -246,7 +246,18 @@ kubectl apply -f https://raw.githubusercontent.com/mohamedhabas11/runner_operato
 make deploy IMG=example.com/runner-operator:v0.0.1
 ```
 
-### Option 3: Helm (coming soon)
+### Option 3: Helm from GitHub Pages
+
+```bash
+helm repo add runner-operator https://mohamedhabas11.github.io/runner_operator
+helm install my-release runner-operator/runner-operator --namespace runner-operator-system --create-namespace
+```
+
+#### Setup (one-time)
+
+1. Enable **GitHub Pages** in repo Settings → Pages → Deploy from branch → `gh-pages` / `/ (root)`
+2. The `release-chart` workflow will auto-create the `gh-pages` branch on the first chart version bump
+3. Bump `version` in `dist/chart/Chart.yaml` and push → workflow publishes a new release
 
 ## Webhook Events
 
