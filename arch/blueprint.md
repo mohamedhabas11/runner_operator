@@ -3,51 +3,50 @@
 ## Overview
 
 runner-operator runs arbitrary OCI images as disposable Kubernetes Jobs.
-Two CRDs — **Runner** (single job) and **Workflow** (DAG of chained
-Runners) — define what to run; two controllers reconcile them into
-batch/v1.Job and child Runner objects.
+Three CRDs — **Runner** (single job), **Workflow** (DAG of chained
+Runners), and **EventTrigger** (webhook → Workflow) — define what to run;
+three controllers reconcile them into batch/v1.Job, child Runner objects,
+and Workflow CRs.
 
 ```
-.──────────────────────────────────────────────────────────────────────.
-│                         Kubernetes Cluster                          │
-│                                                                      │
-│  ┌──────────────────────┐            ┌──────────────────────┐        │
-│  │      Runner CR       │            │     Workflow CR      │        │
-│  │   ─────────────────   │            │   ─────────────────── │        │
-│  │   image: nginx       │            │   timeout: "10m"     │        │
-│  │   command: ["sh"]    │            │   steps:             │        │
-│  │   args: ["..."]      │            │     - name: build    │        │
-│  │   env: [...]         │            │     - name: test     │        │
-│  │   gitRepo: {...}     │            │     - name: deploy   │        │
-│  └──────────┬───────────┘            └──────────┬────────────┘        │
-│             │                                    │                   │
-│             │  reconcile                         │  reconcile         │
-│             ▼                                    ▼                   │
-│  ┌──────────────────────┐            ┌──────────────────────┐        │
-│  │   Runner Controller  │            │  Workflow Controller  │        │
-│  │  ───────────────────  │            │  ──────────────────── │        │
-│  │  watches Runners     │            │  watches Workflows    │        │
-│  │  + owned Jobs        │            │  + owned Runners      │        │
-│  │  creates batch/v1.Job│            │  creates Runner CR    │        │
-│  └──────────┬───────────┘            └──────────┬────────────┘        │
-│             │                                    │                   │
-│             │  .Owns()                            │  .Owns()          │
-│             ▼                                    ▼                   │
-│  ┌──────────────────────┐            ┌──────────────────────┐        │
-│  │    batch/v1.Job      │◄───────────│  Runner CR (per step)│        │
-│  │  ───────────────────  │  creates   │  ─────────────────── │        │
-│  │  runner-<name>-job   │            │  runner-<wf>-<step>  │        │
-│  └──────────┬───────────┘            └──────────────────────┘        │
-│             │                                                        │
-│             │  owns Pod                                              │
-│             ▼                                                        │
-│  ┌──────────────────────┐                                            │
-│  │  Pod (ephemeral)     │                                            │
-│  │  ───────────────────  │                                            │
-│  │  init: git-clone     │   (if gitRepo is set)                     │
-│  │  main: runner        │   (user image + command)                  │
-│  └──────────────────────┘                                            │
-'──────────────────────────────────────────────────────────────────────'
+.──────────────────────────────────────────────────────────────────────────────.
+│                           Kubernetes Cluster                                 │
+│                                                                              │
+│  ┌────────────────────┐  ┌────────────────────┐  ┌──────────────────────┐   │
+│  │     Runner CR      │  │    Workflow CR     │  │   EventTrigger CR    │   │
+│  │  ─────────────────  │  │  ─────────────────  │  │  ───────────────────  │   │
+│  │  image: nginx      │  │  timeout: "10m"    │  │  webhook:            │   │
+│  │  command: ["sh"]   │  │  steps: [...]      │  │    path: /github     │   │
+│  │  gitRepo: {...}    │  │  jobs: [...]       │  │  workflowTemplate    │   │
+│  └─────────┬──────────┘  └─────────┬──────────┘  └──────────┬───────────┘   │
+│            │                      │                         │                │
+│            │  reconcile           │  reconcile              │  reconcile     │
+│            ▼                      ▼                         ▼                │
+│  ┌────────────────────┐  ┌────────────────────┐  ┌──────────────────────┐   │
+│  │ Runner Controller  │  │ Workflow Controlle │  │ EventTrigger Contrl │   │
+│  │ ──────────────────  │  │ ──────────────────  │  │ ───────────────────  │   │
+│  │ watches Runners    │  │ watches Workflows  │  │ watches EventTriggr │   │
+│  │ + owned Jobs       │  │ + owned Runners    │  │ owns webhook routes  │   │
+│  │ creates batch/Job  │  │ creates Runner CR  │  │ register/deregister  │   │
+│  └─────────┬──────────┘  └─────────┬──────────┘  │ + creates Workflow   │   │
+│            │                      │              └──────────────────────┘   │
+│            │  .Owns()             │  .Owns()              │                 │
+│            ▼                      ▼                       │                 │
+│  ┌────────────────────┐  ┌────────────────────┐          │                 │
+│  │   batch/v1.Job     │◄─│ Runner CR (per step)│          │                 │
+│  │ ──────────────────  │  │ ──────────────────  │          │                 │
+│  │ runner-<name>-job  │  │ runner-<wf>-<step>  │          │                 │
+│  └─────────┬──────────┘  └────────────────────┘          │                 │
+│            │                                              │                 │
+│            │  owns Pod                                    │  SetController  │
+│            ▼                                              ▼ Reference       │
+│  ┌────────────────────┐                           ┌──────────────────────┐  │
+│  │  Pod (ephemeral)   │                           │  Workflow CR         │  │
+│  │ ──────────────────  │                           │  (created by webhook)│  │
+│  │ init: git-clone    │                           └──────────────────────┘  │
+│  │ main: user image   │                                                      │
+│  └────────────────────┘                                                      │
+'──────────────────────────────────────────────────────────────────────────────'
 ```
 
 ---
@@ -304,9 +303,14 @@ if [ -f /etc/git-auth/ssh-privatekey ]; then
   ssh-keyscan github.com gitlab.com bitbucket.org >> ~/.ssh/known_hosts 2>/dev/null || true
 fi
 
-git clone --depth 1 <URL> /workspace/repo
-git -C /workspace/repo fetch origin "<revision>"
-git -C /workspace/repo checkout "<revision>"
+git clone --depth 1 -- <URL> /workspace/repo
+git -C /workspace/repo fetch origin -- <revision>
+git -C /workspace/repo checkout <revision>
+
+# If gitRepo.path is set, cd into the subdirectory for the init container
+if [ -n "<path>" ]; then
+  cd /workspace/repo/<path>
+fi
 
 rm -rf ~/.ssh    # only if auth was used
 ```
@@ -394,8 +398,9 @@ Kuberentes garbage-collects child resources when their owner is deleted
 (controller reference chain):
 
 ```
-  Runner     ── owns ──▶  batch/v1.Job  ── owns ──▶  Pod
-  Workflow   ── owns ──▶  Runner (per step)
+  Runner       ── owns ──▶  batch/v1.Job  ── owns ──▶  Pod
+  Workflow     ── owns ──▶  Runner (per step)
+  EventTrigger ── owns ──▶  Workflow (webhook-created)
 ```
 
 No finalizer logic needed.  `BackoffLimit: 0` on Jobs ensures the operator
@@ -412,7 +417,11 @@ No finalizer logic needed.  `BackoffLimit: 0` on Jobs ensures the operator
 | Runner controller    | pods                                   | get, list, watch            |
 | Workflow controller  | workflows, workflows/status            | CRUD                        |
 | Workflow controller  | runners, runners/status                | CRUD + get                  |
-| Both controllers     | events                                 | create, patch               |
+| EventTrigger control | eventtriggers, eventtriggers/status    | CRUD                        |
+| EventTrigger control | workflows                              | get, list, watch, create    |
+| EventTrigger control | secrets                                | get, list, watch            |
+| EventTrigger control | namespaces                             | get, list, watch            |
+| All three controlers | events                                 | create, patch               |
 
 ---
 
@@ -496,6 +505,7 @@ spec:
 ### Webhook Server
 
 - Runs inside the manager binary on port **8080** (separate from admission webhooks on 9443)
+- Port is configurable via `--webhook-event-addr` (default `:8080`)
 - No TLS — TLS termination handled at the Ingress
 - Routes are registered/deregistered dynamically as EventTrigger CRs are created/updated/deleted
 - GitHub webhook handler: validates HMAC-SHA256 with the Secret key, parses push/pull_request/release events
@@ -614,8 +624,8 @@ spec:
   jobs:
     - name: build
       sharedVolume:
-        pvc:
-          claimName: build-workspace   # existing PVC, or:
+        persistentVolumeClaim:         # existing PVC, or omit for emptyDir
+          claimName: build-workspace
         emptyDir: {}
       steps:
         - name: compile
@@ -654,3 +664,6 @@ existing flat-step reconciler path.
 | **EventTrigger as new CRD** | Declarative, Kubernetes-native; controller reconciles triggers → registers/deregisters webhook routes |
 | **Dot-path JSON selectors for parameters** | Zero new dependencies; sufficient for common GitHub webhook fields; upgrade to CEL later |
 | **Backward-compatible Workflow extension** | Existing flat `spec.steps` Workflows continue unchanged; `spec.jobs` is additive |
+| **RunnerRef cross-namespace (`runnerRef.namespace`)** | Workflow steps can reference Runner templates in any namespace; defaults to workflow's namespace for backward compat |
+| **AllowedNamespaces enforcement** | EventTrigger can restrict which namespaces its webhook may create Workflows in; enforced in both webhook server and controller (defence in depth) |
+| **EventTrigger → Workflow owner reference** | Webhook-created Workflows are owned by their EventTrigger; GC cascades on trigger deletion (no orphaned Workflows) |

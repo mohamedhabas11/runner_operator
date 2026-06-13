@@ -84,7 +84,7 @@ pod layouts, state machines, and design decisions.
 |-------|------|----------|-------------|
 | `spec.timeout` | `metav1.Duration` | no | Workflow-level timeout |
 | `spec.steps` | `[]WorkflowStep` | no | Flat step list (backward compatible) |
-| `spec.jobs` | `[]JobSpec` | no | Job grouping (supersedes steps) |
+| `spec.jobs` | `[]JobSpec` | no | Job grouping (ignored when steps is set) |
 
 **WorkflowStep fields:**
 
@@ -143,7 +143,7 @@ helm repo add runner-operator https://mohamedhabas11.github.io/runner_operator
 helm install runner-operator runner-operator/runner-operator \
   --namespace runner-operator-system --create-namespace \
   --set manager.image.repository=ghcr.io/your-org/runner-operator \
-  --set manager.image.tag=v0.1.0
+  --set manager.image.tag=v0.3.0
 ```
 
 **Upgrading:**
@@ -195,7 +195,7 @@ make deploy IMG=example.com/runner-operator:v0.0.1
 | `manager.image.tag` | `""` | Defaults to Chart.appVersion |
 | `manager.image.pullPolicy` | `IfNotPresent` | Image pull policy |
 | `manager.imagePullSecrets` | `[]` | Auth for private registries |
-| `manager.args` | `["--leader-elect"]` | Extra CLI args |
+| `manager.args` | `["--leader-elect"]` | Extra CLI args (overrides binary default `false` for HA) |
 | `manager.resources.limits.cpu` | `500m` | CPU limit |
 | `manager.resources.limits.memory` | `128Mi` | Memory limit |
 | `manager.resources.requests.cpu` | `10m` | CPU request |
@@ -527,6 +527,8 @@ kubectl describe clusterrole runner-operator-editor
 | `eventtriggers` / `eventtriggers/status` | CRUD |
 | `batch/jobs` / `batch/jobs/status` | CRUD + get |
 | `pods` | get, list, watch |
+| `secrets` | get, list, watch |
+| `namespaces` | get, list, watch |
 | `events` | create, patch |
 
 ---
@@ -797,7 +799,7 @@ make run ARGS="--webhook-event-addr=:9090"
 
 ### Why tag-driven releases?
 
-Chart and binary are published together from a git tag (`v0.1.0`), not on
+Chart and binary are published together from a git tag (`v0.3.0`), not on
 every push to main. This ensures:
 
 - Chart version always matches the release tag
