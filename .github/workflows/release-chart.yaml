@@ -1,10 +1,9 @@
-name: Release Helm Chart
+name: Release
 
 on:
   push:
-    branches: [main]
-    paths: ["dist/chart/**"]
-  workflow_dispatch:
+    tags:
+      - "v*"
 
 permissions:
   contents: write
@@ -17,18 +16,82 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Configure Git
+      - uses: azure/setup-helm@v4
+
+      - name: Set chart version from tag
         run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          sed -i "s/^version:.*/version: ${VERSION}/" dist/chart/Chart.yaml
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Package chart
+        run: helm package dist/chart --destination .release-packages
+
+      - name: Generate release notes
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          cat > /tmp/release-notes.md << NOTEEND
+          ## runner-operator ${GITHUB_REF_NAME}
+
+          ### CRD Upgrade Notice
+
+          Helm does not automatically update CRDs during \`helm upgrade\`.
+          If this release includes CRD schema changes, apply them first:
+
+          \`\`\`
+          kubectl apply --server-side -f https://raw.githubusercontent.com/mohamedhabas11/runner_operator/${GITHUB_REF_NAME}/config/crd/bases/
+          \`\`\`
+
+          Then proceed with the Helm upgrade:
+
+          \`\`\`
+          helm repo update runner-operator
+          helm upgrade runner-operator runner-operator/runner-operator
+          \`\`\`
+
+          ### Changes
+
+          NOTEEND
+          if [ -n "$PREV_TAG" ]; then
+            git log "${PREV_TAG}..HEAD" --oneline >> /tmp/release-notes.md
+          else
+            git log --oneline -30 >> /tmp/release-notes.md
+          fi
+
+      - name: Create GitHub Release
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            .release-packages/runner-operator-*.tgz \
+            --title "runner-operator ${GITHUB_REF_NAME}" \
+            -F /tmp/release-notes.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish chart to GitHub Pages
+        run: |
+          git fetch origin gh-pages
+          git worktree add /tmp/gh-pages gh-pages
+
+          # Copy chart package next to index.yaml
+          cp .release-packages/runner-operator-*.tgz /tmp/gh-pages/
+
+          # Regenerate index, merging with existing entries
+          if [ -f /tmp/gh-pages/index.yaml ]; then
+            helm repo index /tmp/gh-pages/ \
+              --url https://mohamedhabas11.github.io/runner_operator \
+              --merge /tmp/gh-pages/index.yaml
+          else
+            helm repo index /tmp/gh-pages/ \
+              --url https://mohamedhabas11.github.io/runner_operator
+          fi
+
+          cd /tmp/gh-pages
+          git add .
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "Release ${GITHUB_REF_NAME}" || true
+          git push origin gh-pages
 
-      - name: Install Helm
-        uses: azure/setup-helm@v4
-
-      - name: Run chart-releaser
-        uses: helm/chart-releaser-action@v1.7.0
-        with:
-          charts_dir: dist
-          config: dist/chart/cr.yaml
+          git worktree remove /tmp/gh-pages
         env:
-          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

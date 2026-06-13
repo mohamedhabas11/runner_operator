@@ -135,29 +135,39 @@ pod layouts, state machines, and design decisions.
 
 ## Installation
 
-### Option 1: Helm (recommended)
+### Users — Helm (recommended)
 
 ```bash
 helm repo add runner-operator https://mohamedhabas11.github.io/runner_operator
 helm install runner-operator runner-operator/runner-operator \
-  --namespace runner-operator-system --create-namespace
-```
-
-Set the image:
-
-```bash
-helm upgrade runner-operator runner-operator/runner-operator \
+  --namespace runner-operator-system --create-namespace \
   --set manager.image.repository=ghcr.io/your-org/runner-operator \
   --set manager.image.tag=v0.1.0
 ```
 
-### Option 2: Kustomize (single-command)
+**Upgrading:**
+
+```bash
+# 1. Apply any CRD schema changes first (Helm skips CRD updates)
+kubectl apply --server-side -f https://raw.githubusercontent.com/mohamedhabas11/runner_operator/<tag>/config/crd/bases/
+
+# 2. Upgrade
+helm repo update runner-operator
+helm upgrade runner-operator runner-operator/runner-operator
+```
+
+### Quick test — Kustomize bundle
+
+No Helm, no Tiller — just kubectl:
 
 ```bash
 kubectl apply -f https://raw.githubusercontent.com/mohamedhabas11/runner_operator/main/dist/install.yaml
 ```
 
-### Option 3: Makefile (development)
+> Use this for ad-hoc testing or CI. Helm is preferred for production
+> (upgrade safety, rollback, values overrides).
+
+### Contributors — Makefile
 
 ```bash
 make deploy IMG=example.com/runner-operator:v0.0.1
@@ -740,6 +750,41 @@ make generate         # Regenerate DeepCopy methods
 ```
 
 ---
+
+## Design Decisions
+
+### Why is the git clone script generated inline?
+
+The init container command is built at runtime by the controller rather than
+using a dedicated init image. This matches how Tekton, Argo Workflows, and
+the kubebuilder deploy-image plugin work.
+
+Rationale:
+- `alpine/git` is ~5 MB and cached on most cluster nodes — no extra image to build or pull
+- The script is simple (clone + checkout) and changes infrequently
+- When you need custom logic (Git LFS, submodules, sparse checkout), swap in
+  your own init image by referencing it in a custom Runner
+
+### Why is the webhook server in the same binary as the controller?
+
+The event webhook server runs on port 8080 inside the controller-manager
+pod, not as a separate Deployment.
+
+Rationale:
+- Single binary, single Deployment, single Service — simpler operations
+- The webhook does lightweight work (HMAC check + CR creation) — contention is negligible
+- Scales naturally with the manager: 2 replicas = 2 webhook listeners behind a Service
+- Can be extracted to a separate Deployment later if throughput demands it
+  (the controller and webhook communicate only through the API server)
+
+### Why tag-driven releases?
+
+Chart and binary are published together from a git tag (`v0.1.0`), not on
+every push to main. This ensures:
+
+- Chart version always matches the release tag
+- Release notes document CRD upgrade procedures
+- Users subscribe to stable releases, not every commit
 
 ## Architecture Blueprint
 
