@@ -92,7 +92,7 @@ func NewServer(cl client.Client, port string) *Server {
 }
 
 // RegisterRoute adds or updates a webhook route from an EventTrigger.
-func (s *Server) RegisterRoute(trigger runnersv1alpha1.EventTrigger) error {
+func (s *Server) RegisterRoute(ctx context.Context, trigger runnersv1alpha1.EventTrigger) error {
 	if trigger.Spec.Webhook == nil || trigger.Spec.Webhook.Path == "" {
 		return fmt.Errorf("EventTrigger %s/%s has no webhook path", trigger.Namespace, trigger.Name)
 	}
@@ -101,7 +101,7 @@ func (s *Server) RegisterRoute(trigger runnersv1alpha1.EventTrigger) error {
 	if trigger.Spec.Webhook.SecretRef != nil {
 		secret := &corev1.Secret{}
 		ns := trigger.Namespace
-		if err := s.client.Get(context.TODO(), types.NamespacedName{
+		if err := s.client.Get(ctx, types.NamespacedName{
 			Name:      trigger.Spec.Webhook.SecretRef.Name,
 			Namespace: ns,
 		}, secret); err != nil {

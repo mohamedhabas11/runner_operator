@@ -48,16 +48,16 @@ func computeHMAC(secret, body []byte) string {
 }
 
 func TestExtractDotPath(t *testing.T) {
-	data := map[string]interface{}{
+	data := map[string]any{
 		"ref": "refs/heads/main",
-		"repository": map[string]interface{}{
+		"repository": map[string]any{
 			"full_name": "org/repo",
-			"owner": map[string]interface{}{
+			"owner": map[string]any{
 				"login": "octocat",
 			},
 		},
-		"commits": []interface{}{
-			map[string]interface{}{"id": "abc123"},
+		"commits": []any{
+			map[string]any{"id": "abc123"},
 		},
 		"numeric": 42.0,
 	}
@@ -104,9 +104,9 @@ func TestSanitizeValue(t *testing.T) {
 }
 
 func TestExtractParams(t *testing.T) {
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"ref": "refs/heads/feature",
-		"repository": map[string]interface{}{
+		"repository": map[string]any{
 			"full_name": "myorg/myrepo",
 		},
 	}
@@ -135,7 +135,7 @@ func TestExtractParams(t *testing.T) {
 }
 
 func TestExtractParamsSanitize(t *testing.T) {
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"branch": "feature; rm -rf /",
 	}
 
@@ -161,7 +161,7 @@ func TestRateCounterAllow(t *testing.T) {
 		t.Error("Expected first request to be allowed")
 	}
 
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		if !rc.allow(5) {
 			t.Errorf("Expected request %d to be allowed", i+2)
 		}
@@ -172,7 +172,7 @@ func TestRateCounterAllow(t *testing.T) {
 	}
 
 	rc2 := newRateCounter()
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		if !rc2.allow(0) {
 			t.Error("Expected unlimited rate to always allow")
 			break
@@ -198,7 +198,7 @@ func TestRateCounterExpiry(t *testing.T) {
 
 func TestPayloadRoundTrip(t *testing.T) {
 	raw := `{"action":"opened","pull_request":{"number":1,"title":"Test PR"}}`
-	var payload map[string]interface{}
+	var payload map[string]any
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestPayloadRoundTrip(t *testing.T) {
 		t.Errorf("action = %q, want %q", payload["action"], "opened")
 	}
 
-	pr := payload["pull_request"].(map[string]interface{})
+	pr := payload["pull_request"].(map[string]any)
 	if pr["number"] != float64(1) {
 		t.Errorf("pr.number = %v, want %v", pr["number"], 1)
 	}

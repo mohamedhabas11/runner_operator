@@ -101,16 +101,16 @@ type WorkflowStep struct {
 	GitRepo *GitRepo `json:"gitRepo,omitempty"`
 }
 
-// JopPhase is a label for the current lifecycle phase of a workflow job.
-type JopPhase string
+// JobPhase is a label for the current lifecycle phase of a workflow job.
+type JobPhase string
 
 const (
-	JopPhasePending   JopPhase = "Pending"
-	JopPhaseRunning   JopPhase = "Running"
-	JopPhaseSucceeded JopPhase = "Succeeded"
-	JopPhaseFailed    JopPhase = "Failed"
-	JopPhaseSkipped   JopPhase = "Skipped"
-	JopPhaseWaiting   JopPhase = "Waiting"
+	JobPhasePending   JobPhase = "Pending"
+	JobPhaseRunning   JobPhase = "Running"
+	JobPhaseSucceeded JobPhase = "Succeeded"
+	JobPhaseFailed    JobPhase = "Failed"
+	JobPhaseSkipped   JobPhase = "Skipped"
+	JobPhaseWaiting   JobPhase = "Waiting"
 )
 
 // SharedVolume defines a volume shared between steps in a job group.
@@ -190,7 +190,7 @@ type JobStatus struct {
 	Name string `json:"name"`
 
 	// Phase of the job execution.
-	Phase JopPhase `json:"phase"`
+	Phase JobPhase `json:"phase"`
 
 	// StartedAt is when the job started.
 	// +optional

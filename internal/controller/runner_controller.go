@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -34,7 +35,7 @@ type RunnerReconciler struct {
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=batch,resources=jobs/status,verbs=get
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
-// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -60,6 +61,14 @@ func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	err = r.Get(ctx, types.NamespacedName{Name: jobName, Namespace: runner.Namespace}, existingJob)
 
 	if apierrors.IsNotFound(err) {
+		patchBase := client.MergeFrom(runner.DeepCopy())
+		runner.Status.Phase = runnersv1alpha1.RunnerPhasePending
+		runner.Status.ResourceHash = specHash
+		runner.Status.ObservedGeneration = runner.Generation
+		if err := r.Status().Patch(ctx, runner, patchBase); err != nil {
+			return ctrl.Result{}, err
+		}
+
 		job := r.buildJob(runner, jobName, specHash)
 		if err := controllerutil.SetControllerReference(runner, job, r.Scheme); err != nil {
 			return ctrl.Result{}, err
@@ -71,13 +80,6 @@ func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 		r.Recorder.Event(runner, corev1.EventTypeNormal, "JobCreated", "Job created for Runner")
 
-		patchBase := client.MergeFrom(runner.DeepCopy())
-		runner.Status.Phase = runnersv1alpha1.RunnerPhasePending
-		runner.Status.ResourceHash = specHash
-		runner.Status.ObservedGeneration = runner.Generation
-		if err := r.Status().Patch(ctx, runner, patchBase); err != nil {
-			return ctrl.Result{}, err
-		}
 		return ctrl.Result{}, nil
 	}
 	if err != nil {
@@ -245,8 +247,12 @@ func buildGitInitContainer(gitRepo *runnersv1alpha1.GitRepo, volumeName string) 
 	return c
 }
 
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
 func buildGitCloneScript(gitRepo *runnersv1alpha1.GitRepo) string {
-	cloneURL := gitRepo.URL
+	cloneURL := shellQuote(gitRepo.URL)
 	var script string
 
 	if gitRepo.Auth != nil && gitRepo.Auth.SecretRef != nil {
@@ -259,9 +265,10 @@ fi
 `
 	}
 
-	script += "git clone --depth 1 " + cloneURL + " /workspace/repo"
+	script += "git clone --depth 1 -- " + cloneURL + " /workspace/repo"
 	if gitRepo.Revision != "" {
-		script += ` && git -C /workspace/repo fetch origin "` + gitRepo.Revision + `" && git -C /workspace/repo checkout "` + gitRepo.Revision + `"`
+		rev := shellQuote(gitRepo.Revision)
+		script += " && git -C /workspace/repo fetch origin -- " + rev + " && git -C /workspace/repo checkout " + rev
 	}
 
 	if gitRepo.Auth != nil && gitRepo.Auth.SecretRef != nil {

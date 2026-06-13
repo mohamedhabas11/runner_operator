@@ -43,7 +43,7 @@ type EventTriggerReconciler struct {
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=eventtriggers/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=workflows,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
-// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 // Reconcile reconciles an EventTrigger: registers or deregisters webhook routes.
 func (r *EventTriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -66,7 +66,7 @@ func (r *EventTriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	updated := false
 
 	if trigger.Spec.Webhook != nil && trigger.Spec.Webhook.Path != "" {
-		if err := r.WebhookSrv.RegisterRoute(*trigger); err != nil {
+		if err := r.WebhookSrv.RegisterRoute(ctx, *trigger); err != nil {
 			logger.Error(err, "Failed to register webhook route", "path", trigger.Spec.Webhook.Path)
 			r.Recorder.Eventf(trigger, corev1.EventTypeWarning, "RouteRegistrationFailed",
 				"Failed to register webhook route %q: %v", trigger.Spec.Webhook.Path, err)
@@ -88,6 +88,12 @@ func (r *EventTriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if updated {
 		if err := r.Status().Patch(ctx, trigger, patchBase); err != nil {
 			return ctrl.Result{}, err
+		}
+	}
+
+	if trigger.Spec.Webhook != nil && trigger.Spec.Webhook.Path != "" {
+		if !trigger.Status.Registered {
+			return ctrl.Result{}, fmt.Errorf("route %q not registered", trigger.Spec.Webhook.Path)
 		}
 	}
 

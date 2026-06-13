@@ -65,10 +65,10 @@ func TestDetectJobCycle(t *testing.T) {
 }
 
 func TestEvaluateJobWhen(t *testing.T) {
-	pending := runnersv1alpha1.JobStatus{Phase: runnersv1alpha1.JopPhasePending}
-	running := runnersv1alpha1.JobStatus{Phase: runnersv1alpha1.JopPhaseRunning}
-	success := runnersv1alpha1.JobStatus{Phase: runnersv1alpha1.JopPhaseSucceeded}
-	failed := runnersv1alpha1.JobStatus{Phase: runnersv1alpha1.JopPhaseFailed}
+	pending := runnersv1alpha1.JobStatus{Phase: runnersv1alpha1.JobPhasePending}
+	running := runnersv1alpha1.JobStatus{Phase: runnersv1alpha1.JobPhaseRunning}
+	success := runnersv1alpha1.JobStatus{Phase: runnersv1alpha1.JobPhaseSucceeded}
+	failed := runnersv1alpha1.JobStatus{Phase: runnersv1alpha1.JobPhaseFailed}
 
 	tests := []struct {
 		name string
@@ -141,7 +141,7 @@ func TestBuildJobStatusMap(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
 		Status: runnersv1alpha1.WorkflowStatus{
 			JobStatuses: []runnersv1alpha1.JobStatus{
-				{Name: "build", Phase: runnersv1alpha1.JopPhaseSucceeded},
+				{Name: "build", Phase: runnersv1alpha1.JobPhaseSucceeded},
 			},
 		},
 	}
@@ -151,7 +151,7 @@ func TestBuildJobStatusMap(t *testing.T) {
 	if len(m) != 1 {
 		t.Errorf("expected 1 entry, got %d", len(m))
 	}
-	if m["build"].Phase != runnersv1alpha1.JopPhaseSucceeded {
+	if m["build"].Phase != runnersv1alpha1.JobPhaseSucceeded {
 		t.Errorf("build phase = %v, want Succeeded", m["build"].Phase)
 	}
 	if _, ok := m["test"]; ok {
@@ -199,13 +199,13 @@ func TestFilterRunnersByJob(t *testing.T) {
 
 func TestFindJobStatus(t *testing.T) {
 	statuses := []runnersv1alpha1.JobStatus{
-		{Name: "build", Phase: runnersv1alpha1.JopPhaseSucceeded},
-		{Name: "test", Phase: runnersv1alpha1.JopPhaseFailed},
+		{Name: "build", Phase: runnersv1alpha1.JobPhaseSucceeded},
+		{Name: "test", Phase: runnersv1alpha1.JobPhaseFailed},
 	}
 
 	if s, ok := findJobStatus(statuses, "build"); !ok {
 		t.Error("expected to find build")
-	} else if s.Phase != runnersv1alpha1.JopPhaseSucceeded {
+	} else if s.Phase != runnersv1alpha1.JobPhaseSucceeded {
 		t.Errorf("build phase = %v", s.Phase)
 	}
 
@@ -215,7 +215,7 @@ func TestFindJobStatus(t *testing.T) {
 
 	if s, ok := findJobStatus(statuses, "test"); !ok {
 		t.Error("expected to find test")
-	} else if s.Phase != runnersv1alpha1.JopPhaseFailed {
+	} else if s.Phase != runnersv1alpha1.JobPhaseFailed {
 		t.Errorf("test phase = %v", s.Phase)
 	}
 }
@@ -224,26 +224,26 @@ func TestUpsertJobStatus(t *testing.T) {
 	wf := &runnersv1alpha1.Workflow{
 		Status: runnersv1alpha1.WorkflowStatus{
 			JobStatuses: []runnersv1alpha1.JobStatus{
-				{Name: "build", Phase: runnersv1alpha1.JopPhasePending},
+				{Name: "build", Phase: runnersv1alpha1.JobPhasePending},
 			},
 		},
 	}
 
-	upsertJobStatus(wf, "build", runnersv1alpha1.JopPhaseRunning)
+	upsertJobStatus(wf, "build", runnersv1alpha1.JobPhaseRunning)
 	if len(wf.Status.JobStatuses) != 1 {
 		t.Errorf("expected 1 entry, got %d", len(wf.Status.JobStatuses))
 	}
-	if wf.Status.JobStatuses[0].Phase != runnersv1alpha1.JopPhaseRunning {
+	if wf.Status.JobStatuses[0].Phase != runnersv1alpha1.JobPhaseRunning {
 		t.Errorf("build phase = %v, want Running", wf.Status.JobStatuses[0].Phase)
 	}
 
-	upsertJobStatus(wf, "test", runnersv1alpha1.JopPhasePending)
+	upsertJobStatus(wf, "test", runnersv1alpha1.JobPhasePending)
 	if len(wf.Status.JobStatuses) != 2 {
 		t.Errorf("expected 2 entries, got %d", len(wf.Status.JobStatuses))
 	}
 
 	wf2 := &runnersv1alpha1.Workflow{}
-	upsertJobStatus(wf2, "a", runnersv1alpha1.JopPhasePending)
+	upsertJobStatus(wf2, "a", runnersv1alpha1.JobPhasePending)
 	if len(wf2.Status.JobStatuses) != 1 {
 		t.Errorf("expected 1 entry, got %d", len(wf2.Status.JobStatuses))
 	}
@@ -256,8 +256,8 @@ func TestComputeJobWorkflowPhase(t *testing.T) {
 			Jobs: []runnersv1alpha1.JobSpec{{Name: "a"}, {Name: "b"}},
 		},
 	}
-	upsertJobStatus(wf1, "a", runnersv1alpha1.JopPhaseSucceeded)
-	upsertJobStatus(wf1, "b", runnersv1alpha1.JopPhaseSucceeded)
+	upsertJobStatus(wf1, "a", runnersv1alpha1.JobPhaseSucceeded)
+	upsertJobStatus(wf1, "b", runnersv1alpha1.JobPhaseSucceeded)
 
 	if got := computeJobWorkflowPhase(wf1); got != runnersv1alpha1.WorkflowPhaseSucceeded {
 		t.Errorf("all succeeded: got %v, want Succeeded", got)
@@ -269,8 +269,8 @@ func TestComputeJobWorkflowPhase(t *testing.T) {
 			Jobs: []runnersv1alpha1.JobSpec{{Name: "a"}, {Name: "b"}},
 		},
 	}
-	upsertJobStatus(wf2, "a", runnersv1alpha1.JopPhaseSucceeded)
-	upsertJobStatus(wf2, "b", runnersv1alpha1.JopPhaseFailed)
+	upsertJobStatus(wf2, "a", runnersv1alpha1.JobPhaseSucceeded)
+	upsertJobStatus(wf2, "b", runnersv1alpha1.JobPhaseFailed)
 
 	if got := computeJobWorkflowPhase(wf2); got != runnersv1alpha1.WorkflowPhaseFailed {
 		t.Errorf("one failed: got %v, want Failed", got)
@@ -282,8 +282,8 @@ func TestComputeJobWorkflowPhase(t *testing.T) {
 			Jobs: []runnersv1alpha1.JobSpec{{Name: "a"}, {Name: "b"}},
 		},
 	}
-	upsertJobStatus(wf3, "a", runnersv1alpha1.JopPhaseSkipped)
-	upsertJobStatus(wf3, "b", runnersv1alpha1.JopPhaseSkipped)
+	upsertJobStatus(wf3, "a", runnersv1alpha1.JobPhaseSkipped)
+	upsertJobStatus(wf3, "b", runnersv1alpha1.JobPhaseSkipped)
 
 	if got := computeJobWorkflowPhase(wf3); got != runnersv1alpha1.WorkflowPhaseSucceeded {
 		t.Errorf("all skipped: got %v, want Succeeded", got)
@@ -295,8 +295,8 @@ func TestComputeJobWorkflowPhase(t *testing.T) {
 			Jobs: []runnersv1alpha1.JobSpec{{Name: "a"}, {Name: "b"}},
 		},
 	}
-	upsertJobStatus(wf4, "a", runnersv1alpha1.JopPhaseRunning)
-	upsertJobStatus(wf4, "b", runnersv1alpha1.JopPhasePending)
+	upsertJobStatus(wf4, "a", runnersv1alpha1.JobPhaseRunning)
+	upsertJobStatus(wf4, "b", runnersv1alpha1.JobPhasePending)
 
 	if got := computeJobWorkflowPhase(wf4); got != runnersv1alpha1.WorkflowPhaseRunning {
 		t.Errorf("running: got %v, want Running", got)

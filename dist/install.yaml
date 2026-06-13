@@ -3872,6 +3872,13 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
   - pods
   - secrets
   verbs:
@@ -3896,13 +3903,6 @@ rules:
   - jobs/status
   verbs:
   - get
-- apiGroups:
-  - events.k8s.io
-  resources:
-  - events
-  verbs:
-  - create
-  - patch
 - apiGroups:
   - runners.runner-operator.io
   resources:
@@ -4159,6 +4159,24 @@ spec:
     port: 8443
     protocol: TCP
     targetPort: 8443
+  selector:
+    app.kubernetes.io/name: runner-operator
+    control-plane: controller-manager
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: runner-operator
+  name: runner-operator-webhook-event-server
+  namespace: runner-operator-system
+spec:
+  ports:
+  - name: webhook-event
+    port: 80
+    protocol: TCP
+    targetPort: webhook-event
   selector:
     app.kubernetes.io/name: runner-operator
     control-plane: controller-manager

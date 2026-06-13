@@ -31,7 +31,7 @@ type WorkflowReconciler struct {
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=workflows/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=runners,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=runners/status,verbs=get
-// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 func (r *WorkflowReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -160,7 +160,7 @@ func (r *WorkflowReconciler) handleTimeoutJobs(ctx context.Context, wf *runnersv
 	patchBase := client.MergeFrom(wf.DeepCopy())
 
 	for _, job := range wf.Spec.Jobs {
-		upsertJobStatus(wf, job.Name, runnersv1alpha1.JopPhaseFailed)
+		upsertJobStatus(wf, job.Name, runnersv1alpha1.JobPhaseFailed)
 		for _, step := range job.Steps {
 			upsertStepStatus(wf, step.Name, runnersv1alpha1.StepPhaseFailed)
 		}
@@ -586,7 +586,7 @@ func (r *WorkflowReconciler) reconcileJob(ctx context.Context, wf *runnersv1alph
 
 	if hasStatus {
 		switch js.Phase {
-		case runnersv1alpha1.JopPhaseSucceeded, runnersv1alpha1.JopPhaseFailed, runnersv1alpha1.JopPhaseSkipped:
+		case runnersv1alpha1.JobPhaseSucceeded, runnersv1alpha1.JobPhaseFailed, runnersv1alpha1.JobPhaseSkipped:
 			return false
 		}
 	}
@@ -596,21 +596,21 @@ func (r *WorkflowReconciler) reconcileJob(ctx context.Context, wf *runnersv1alph
 	switch decision {
 	case jobSkip:
 		if !hasStatus {
-			upsertJobStatus(wf, job.Name, runnersv1alpha1.JopPhaseSkipped)
+			upsertJobStatus(wf, job.Name, runnersv1alpha1.JobPhaseSkipped)
 			return true
 		}
 		return false
 
 	case jobWait:
-		if !hasStatus || js.Phase != runnersv1alpha1.JopPhaseWaiting {
-			upsertJobStatus(wf, job.Name, runnersv1alpha1.JopPhaseWaiting)
+		if !hasStatus || js.Phase != runnersv1alpha1.JobPhaseWaiting {
+			upsertJobStatus(wf, job.Name, runnersv1alpha1.JobPhaseWaiting)
 			updated = true
 		}
 		return updated
 
 	case jobRun:
-		if !hasStatus || js.Phase != runnersv1alpha1.JopPhaseRunning {
-			upsertJobStatus(wf, job.Name, runnersv1alpha1.JopPhaseRunning)
+		if !hasStatus || js.Phase != runnersv1alpha1.JobPhaseRunning {
+			upsertJobStatus(wf, job.Name, runnersv1alpha1.JobPhaseRunning)
 			updated = true
 		}
 
@@ -637,9 +637,9 @@ func (r *WorkflowReconciler) reconcileJob(ctx context.Context, wf *runnersv1alph
 
 		if allDone {
 			if hasFailed {
-				upsertJobStatus(wf, job.Name, runnersv1alpha1.JopPhaseFailed)
+				upsertJobStatus(wf, job.Name, runnersv1alpha1.JobPhaseFailed)
 			} else {
-				upsertJobStatus(wf, job.Name, runnersv1alpha1.JopPhaseSucceeded)
+				upsertJobStatus(wf, job.Name, runnersv1alpha1.JobPhaseSucceeded)
 			}
 			updated = true
 		}
@@ -857,7 +857,7 @@ func evaluateJobWhen(job *runnersv1alpha1.JobSpec, jobStatusMap map[string]runne
 			return jobWait
 		}
 		switch js.Phase {
-		case runnersv1alpha1.JopPhasePending, runnersv1alpha1.JopPhaseRunning, runnersv1alpha1.JopPhaseWaiting:
+		case runnersv1alpha1.JobPhasePending, runnersv1alpha1.JobPhaseRunning, runnersv1alpha1.JobPhaseWaiting:
 			return jobWait
 		}
 	}
@@ -870,7 +870,7 @@ func evaluateJobWhen(job *runnersv1alpha1.JobSpec, jobStatusMap map[string]runne
 	allSucceeded := true
 	for _, need := range job.Needs {
 		js := jobStatusMap[need]
-		if js.Phase != runnersv1alpha1.JopPhaseSucceeded {
+		if js.Phase != runnersv1alpha1.JobPhaseSucceeded {
 			allSucceeded = false
 			break
 		}
@@ -902,19 +902,19 @@ func buildJobStatusMap(wf *runnersv1alpha1.Workflow) map[string]runnersv1alpha1.
 	return m
 }
 
-func upsertJobStatus(wf *runnersv1alpha1.Workflow, jobName string, phase runnersv1alpha1.JopPhase) {
+func upsertJobStatus(wf *runnersv1alpha1.Workflow, jobName string, phase runnersv1alpha1.JobPhase) {
 	for i, j := range wf.Status.JobStatuses {
 		if j.Name == jobName {
 			if j.Phase != phase {
 				wf.Status.JobStatuses[i].Phase = phase
-				if phase == runnersv1alpha1.JopPhaseRunning {
+				if phase == runnersv1alpha1.JobPhaseRunning {
 					if j.StartedAt == nil {
 						now := metav1.Now()
 						wf.Status.JobStatuses[i].StartedAt = &now
 					}
 					wf.Status.JobStatuses[i].CompletedAt = nil
 				}
-				if phase == runnersv1alpha1.JopPhaseSucceeded || phase == runnersv1alpha1.JopPhaseFailed || phase == runnersv1alpha1.JopPhaseSkipped {
+				if phase == runnersv1alpha1.JobPhaseSucceeded || phase == runnersv1alpha1.JobPhaseFailed || phase == runnersv1alpha1.JobPhaseSkipped {
 					now := metav1.Now()
 					wf.Status.JobStatuses[i].CompletedAt = &now
 				}
@@ -923,7 +923,7 @@ func upsertJobStatus(wf *runnersv1alpha1.Workflow, jobName string, phase runners
 		}
 	}
 	status := runnersv1alpha1.JobStatus{Name: jobName, Phase: phase}
-	if phase == runnersv1alpha1.JopPhaseRunning {
+	if phase == runnersv1alpha1.JobPhaseRunning {
 		now := metav1.Now()
 		status.StartedAt = &now
 	}
@@ -956,10 +956,10 @@ func computeJobWorkflowPhase(wf *runnersv1alpha1.Workflow) runnersv1alpha1.Workf
 			continue
 		}
 		switch js.Phase {
-		case runnersv1alpha1.JopPhasePending, runnersv1alpha1.JopPhaseWaiting, runnersv1alpha1.JopPhaseRunning:
+		case runnersv1alpha1.JobPhasePending, runnersv1alpha1.JobPhaseWaiting, runnersv1alpha1.JobPhaseRunning:
 			allDone = false
 			hasRunning = true
-		case runnersv1alpha1.JopPhaseFailed:
+		case runnersv1alpha1.JobPhaseFailed:
 			hasFailed = true
 		}
 	}
