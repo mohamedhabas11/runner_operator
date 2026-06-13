@@ -124,6 +124,7 @@ pod layouts, state machines, and design decisions.
 |-------|------|----------|-------------|
 | `spec.webhook.path` | `string` | yes | HTTP path (e.g. `/webhooks/github-push`); unique cluster-wide |
 | `spec.webhook.secretRef.name` | `string` | no | K8s Secret with key `hmac-secret` |
+| `spec.webhook.secretRef.namespace` | `string` | no | Secret namespace (defaults to trigger's) |
 | `spec.webhook.allowedIPs` | `[]string` | no | CIDR allow list |
 | `spec.workflowTemplate.name` | `string` | yes | Workflow CR name to instantiate |
 | `spec.workflowTemplate.namespace` | `string` | no | Template namespace (defaults to trigger's) |

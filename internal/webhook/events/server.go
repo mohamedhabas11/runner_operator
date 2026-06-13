@@ -105,7 +105,10 @@ func (s *Server) RegisterRoute(ctx context.Context, trigger runnersv1alpha1.Even
 	var secretValue []byte
 	if trigger.Spec.Webhook.SecretRef != nil {
 		secret := &corev1.Secret{}
-		ns := trigger.Namespace
+		ns := trigger.Spec.Webhook.SecretRef.Namespace
+		if ns == "" {
+			ns = trigger.Namespace
+		}
 		if err := s.client.Get(ctx, types.NamespacedName{
 			Name:      trigger.Spec.Webhook.SecretRef.Name,
 			Namespace: ns,
@@ -310,6 +313,7 @@ func (s *Server) createWorkflow(ctx context.Context, trigger runnersv1alpha1.Eve
 		GenerateName: template.Name + "-",
 		Namespace:    trigger.Namespace,
 		Labels: map[string]string{
+			"app.kubernetes.io/name":           "runner-operator",
 			"runner-operator.io/event-trigger": trigger.Name,
 		},
 	}

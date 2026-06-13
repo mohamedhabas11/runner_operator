@@ -557,10 +557,12 @@ spec:
                                 properties:
                                   initialDelay:
                                     description: InitialDelay between retry attempts.
+                                    format: duration
                                     type: string
                                   maxDelay:
                                     description: MaxDelay caps the delay between retry
                                       attempts.
+                                    format: duration
                                     type: string
                                 required:
                                 - initialDelay
@@ -590,6 +592,7 @@ spec:
                             type: object
                           timeout:
                             description: Timeout for this step.
+                            format: duration
                             type: string
                           when:
                             description: |-
@@ -856,9 +859,11 @@ spec:
                           properties:
                             initialDelay:
                               description: InitialDelay between retry attempts.
+                              format: duration
                               type: string
                             maxDelay:
                               description: MaxDelay caps the delay between retry attempts.
+                              format: duration
                               type: string
                           required:
                           - initialDelay
@@ -887,6 +892,7 @@ spec:
                       type: object
                     timeout:
                       description: Timeout for this step.
+                      format: duration
                       type: string
                     when:
                       description: |-
@@ -902,6 +908,7 @@ spec:
                 x-kubernetes-list-type: map
               timeout:
                 description: Timeout for the entire workflow execution.
+                format: duration
                 type: string
             type: object
           status:

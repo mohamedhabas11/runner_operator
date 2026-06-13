@@ -13,9 +13,9 @@ type WebhookConfig struct {
 	Path string `json:"path"`
 
 	// SecretRef references a Secret containing the HMAC secret for payload validation.
-	// The secret must have key "hmac-secret".
+	// The secret must have key "hmac-secret". Defaults to the EventTrigger's namespace.
 	// +optional
-	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
+	SecretRef *corev1.SecretReference `json:"secretRef,omitempty"`
 
 	// AllowedIPs restricts webhook traffic to specific CIDR ranges.
 	// +optional

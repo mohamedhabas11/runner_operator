@@ -79,6 +79,7 @@ type RunnerSpec struct {
 	// TimeoutAfter defines the maximum duration before the runner is terminated.
 	// Must be a valid Go duration string (e.g. "30m", "1h").
 	// +optional
+	// +kubebuilder:validation:Format=duration
 	TimeoutAfter *metav1.Duration `json:"timeoutAfter,omitempty"`
 
 	// Resources defines CPU and memory limits/requests for the runner container.

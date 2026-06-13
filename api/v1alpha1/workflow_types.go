@@ -56,10 +56,12 @@ type RunnerRef struct {
 type BackoffConfig struct {
 	// InitialDelay between retry attempts.
 	// +required
+	// +kubebuilder:validation:Format=duration
 	InitialDelay metav1.Duration `json:"initialDelay"`
 
 	// MaxDelay caps the delay between retry attempts.
 	// +optional
+	// +kubebuilder:validation:Format=duration
 	MaxDelay *metav1.Duration `json:"maxDelay,omitempty"`
 }
 
@@ -105,6 +107,7 @@ type WorkflowStep struct {
 
 	// Timeout for this step.
 	// +optional
+	// +kubebuilder:validation:Format=duration
 	Timeout *metav1.Duration `json:"timeout,omitempty"`
 
 	// GitRepo defines a Git repository to clone before executing the step.
@@ -194,6 +197,7 @@ type WorkflowSpec struct {
 
 	// Timeout for the entire workflow execution.
 	// +optional
+	// +kubebuilder:validation:Format=duration
 	Timeout *metav1.Duration `json:"timeout,omitempty"`
 }
 

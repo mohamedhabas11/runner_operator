@@ -208,6 +208,7 @@ func (r *WorkflowReconciler) reconcileSteps(ctx context.Context, wf *runnersv1al
 					Message: fmt.Sprintf("Dependencies did not meet the required condition (when: %q)", step.When),
 				})
 				updated = true
+				stepStatusMap = buildStepStatusMap(wf)
 			}
 			continue
 
@@ -218,6 +219,7 @@ func (r *WorkflowReconciler) reconcileSteps(ctx context.Context, wf *runnersv1al
 					Phase: runnersv1alpha1.StepPhaseWaiting,
 				})
 				updated = true
+				stepStatusMap = buildStepStatusMap(wf)
 			}
 			continue
 
@@ -240,6 +242,7 @@ func (r *WorkflowReconciler) reconcileSteps(ctx context.Context, wf *runnersv1al
 					Message: "Runner created",
 				})
 				updated = true
+				stepStatusMap = buildStepStatusMap(wf)
 			} else {
 				stepPhase := runnerPhaseToStepPhase(existing.Status.Phase)
 				if stepPhase == runnersv1alpha1.StepPhaseFailed &&
@@ -262,9 +265,11 @@ func (r *WorkflowReconciler) reconcileSteps(ctx context.Context, wf *runnersv1al
 						}
 					}
 					updated = true
+					stepStatusMap = buildStepStatusMap(wf)
 				} else if !hasStatus || status.Phase != stepPhase {
 					upsertStepStatus(wf, step.Name, stepPhase)
 					updated = true
+					stepStatusMap = buildStepStatusMap(wf)
 				}
 			}
 		}
@@ -682,6 +687,7 @@ func (r *WorkflowReconciler) reconcileJobSteps(ctx context.Context, wf *runnersv
 					Message: fmt.Sprintf("Dependencies did not meet the required condition (when: %q)", step.When),
 				})
 				updated = true
+				stepStatusMap = buildStepStatusMap(wf)
 			}
 			continue
 
@@ -692,6 +698,7 @@ func (r *WorkflowReconciler) reconcileJobSteps(ctx context.Context, wf *runnersv
 					Phase: runnersv1alpha1.StepPhaseWaiting,
 				})
 				updated = true
+				stepStatusMap = buildStepStatusMap(wf)
 			}
 			continue
 
@@ -714,6 +721,7 @@ func (r *WorkflowReconciler) reconcileJobSteps(ctx context.Context, wf *runnersv
 					Message: "Runner created",
 				})
 				updated = true
+				stepStatusMap = buildStepStatusMap(wf)
 			} else {
 				stepPhase := runnerPhaseToStepPhase(existing.Status.Phase)
 				if stepPhase == runnersv1alpha1.StepPhaseFailed &&
@@ -736,9 +744,11 @@ func (r *WorkflowReconciler) reconcileJobSteps(ctx context.Context, wf *runnersv
 						}
 					}
 					updated = true
+					stepStatusMap = buildStepStatusMap(wf)
 				} else if !hasStatus || status.Phase != stepPhase {
 					upsertStepStatus(wf, step.Name, stepPhase)
 					updated = true
+					stepStatusMap = buildStepStatusMap(wf)
 				}
 			}
 		}

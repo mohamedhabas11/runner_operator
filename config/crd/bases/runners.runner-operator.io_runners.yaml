@@ -438,6 +438,7 @@ spec:
                 description: |-
                   TimeoutAfter defines the maximum duration before the runner is terminated.
                   Must be a valid Go duration string (e.g. "30m", "1h").
+                format: duration
                 type: string
               volumes:
                 description: Volumes defines volumes available to the runner.

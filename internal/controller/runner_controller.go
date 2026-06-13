@@ -75,6 +75,10 @@ func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 		logger.Info("Creating Job", "job", jobName)
 		if err := r.Create(ctx, job); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				logger.Info("Job already exists, likely created by concurrent reconcile", "job", jobName)
+				return ctrl.Result{}, nil
+			}
 			return ctrl.Result{}, err
 		}
 
