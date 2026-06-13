@@ -231,12 +231,12 @@ When working on this project:
 
 | Question | Context | Status |
 |----------|---------|--------|
-| Should `RunnerRef` use `ObjectReference` or a custom type? | Cross-namespace template resolution | Open |
-| Should EventTrigger-created workflows be in trigger namespace or template namespace? | Multi-tenant isolation vs. reuse | Open |
-| Should we add validating webhooks or rely on controller-side validation? | Admission control strategy | Open |
+| Should `RunnerRef` use `ObjectReference` or a custom type? | Cross-namespace template resolution | **Decided**: Custom type with Name+Namespace |
+| Should EventTrigger-created workflows be in trigger namespace or template namespace? | Multi-tenant isolation vs. reuse | **Decided**: Trigger namespace (isolation) |
+| Should we add validating webhooks or rely on controller-side validation? | Admission control strategy | **Decided**: Defer to separate session (requires cert-manager) |
 | Should the webhook server be extracted to a separate deployment? | Scaling and isolation | Open |
 | Should we support `batch/v1.Job` annotations for custom Pod configs? | Advanced scheduling (node affinity, tolerations) | Open |
 
 ---
 
-*Last updated: Session 11 — Cross-Namespace & Multi-Tenancy Deep Dive*
+*Last updated: Session 12 — Cross-Namespace Fixes*

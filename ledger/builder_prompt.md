@@ -125,6 +125,42 @@ go build ./...           # compiles
 - Never assume libraries exist — check go.mod first
 - Never commit secrets or keys
 
+## Design Decisions (Signed Off)
+
+| Question | Answer | Rationale |
+|----------|--------|-----------|
+| Validation webhook | **Defer to separate session** | Requires cert-manager + admission TLS scaffold. Not blocking correctness. |
+| EventTrigger workflow namespace | **Trigger namespace (isolation)** | Workflows live where the trigger lives. Template is read-only reference. Prevents cross-tenant pollution. |
+| `gitRepo.Path` implementation | **Fix now** | Already defined in `runner_types.go:42` but ignored in `buildGitInitContainer`. One-line fix. |
+| `--webhook-event-port` flag | **Fix now** | Currently hardcoded 8080 in `cmd/main.go:67`. Should be configurable. |
+
+## Session 13 Tasks
+
+### Task 1: Fix `gitRepo.Path` (P1)
+
+**Current state**: `GitRepo.Path` is defined in `api/v1alpha1/runner_types.go:42` but `buildGitInitContainer` at `internal/controller/runner_controller.go:218` ignores it.
+
+**Fix**: In `runner_controller.go:268`, change:
+```go
+script += "git clone --depth 1 -- " + cloneURL + " /workspace/repo"
+```
+To:
+```go
+script += "git clone --depth 1 -- " + cloneURL + " /workspace/repo"
+if gitRepo.Path != "" {
+    script += " && cd /workspace/repo/" + gitRepo.Path
+}
+```
+
+### Task 2: Expose `--webhook-event-port` Flag (P2)
+
+**Current state**: Port is hardcoded in `cmd/main.go:67`:
+```go
+flag.StringVar(&webhookEventAddr, "webhook-event-addr", ":8080", "...")
+```
+
+**Fix**: Already configurable via flag. Just document in README that `--webhook-event-addr` can be changed.
+
 ## Output
 
 When done, provide:
