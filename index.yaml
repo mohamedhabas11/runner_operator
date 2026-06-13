@@ -5,7 +5,33 @@ entries:
       kubebuilder.io/generated-by: kubebuilder
     apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-06-13T11:45:24.102816451Z"
+    created: "2026-06-13T13:36:38.802485755Z"
+    description: 'runner-operator is a Kubernetes operator that runs arbitrary OCI
+      container images as disposable Jobs and orchestrates multi-step CI/CD pipelines
+      with DAG-based Workflows. '
+    digest: 97ff68ebdee2bf7ad32527c767493781d6aa7154de29a0bafeb5af641c06b063
+    home: https://github.com/mohamedhabas11/runner_operator
+    keywords:
+    - kubernetes
+    - operator
+    - ci
+    - cd
+    - runner
+    maintainers:
+    - name: mohamedhabas11
+      url: https://github.com/mohamedhabas11
+    name: runner-operator
+    sources:
+    - https://github.com/mohamedhabas11/runner_operator
+    type: application
+    urls:
+    - https://mohamedhabas11.github.io/runner_operator/runner-operator-0.3.1.tgz
+    version: 0.3.1
+  - annotations:
+      kubebuilder.io/generated-by: kubebuilder
+    apiVersion: v2
+    appVersion: 0.1.0
+    created: "2026-06-13T13:36:38.801147978Z"
     description: 'runner-operator is a Kubernetes operator that runs arbitrary OCI
       container images as disposable Jobs and orchestrates multi-step CI/CD pipelines
       with DAG-based Workflows. '
@@ -31,7 +57,7 @@ entries:
       kubebuilder.io/generated-by: kubebuilder
     apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-06-13T11:45:24.101429579Z"
+    created: "2026-06-13T13:36:38.799906333Z"
     description: 'runner-operator is a Kubernetes operator that runs arbitrary OCI
       container images as disposable Jobs and orchestrates multi-step CI/CD pipelines
       with DAG-based Workflows. '
@@ -83,7 +109,7 @@ entries:
       kubebuilder.io/generated-by: kubebuilder
     apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-06-13T11:45:24.099593552Z"
+    created: "2026-06-13T13:36:38.798640733Z"
     description: 'runner-operator is a Kubernetes operator that runs arbitrary OCI
       container images as disposable Jobs and orchestrates multi-step CI/CD pipelines
       with DAG-based Workflows. '
@@ -105,4 +131,4 @@ entries:
     urls:
     - https://mohamedhabas11.github.io/runner_operator/runner-operator-0.1.0.tgz
     version: 0.1.0
-generated: "2026-06-13T11:45:24.097642443Z"
+generated: "2026-06-13T13:36:38.796733169Z"
