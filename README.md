@@ -788,6 +788,13 @@ Rationale:
 - Can be extracted to a separate Deployment later if throughput demands it
   (the controller and webhook communicate only through the API server)
 
+The webhook port is configurable via `--webhook-event-addr` (default `:8080`).
+Override it when running the manager:
+```bash
+export IMG=your-registry/runner-operator:tag
+make run ARGS="--webhook-event-addr=:9090"
+```
+
 ### Why tag-driven releases?
 
 Chart and binary are published together from a git tag (`v0.1.0`), not on

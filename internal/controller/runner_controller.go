@@ -271,6 +271,10 @@ fi
 		script += " && git -C /workspace/repo fetch origin -- " + rev + " && git -C /workspace/repo checkout " + rev
 	}
 
+	if gitRepo.Path != "" {
+		script += " && cd /workspace/repo/" + gitRepo.Path
+	}
+
 	if gitRepo.Auth != nil && gitRepo.Auth.SecretRef != nil {
 		script += ` && rm -rf ~/.ssh`
 	}
