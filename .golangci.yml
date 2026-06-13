@@ -35,6 +35,8 @@ linters:
     modernize:
       disable:
         - omitzero
+    staticcheck:
+      checks: ["all", "-SA1019", "-ST1000"]
   exclusions:
     generated: lax
     rules:

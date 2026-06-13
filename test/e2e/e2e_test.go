@@ -64,18 +64,10 @@ var _ = Describe("Manager", Ordered, func() {
 		cmd := exec.Command("kubectl", "delete", "clusterrolebinding", metricsRoleBindingName, "--ignore-not-found")
 		_, _ = utils.Run(cmd)
 
-		By("deleting test namespace")
-		cmd = exec.Command("kubectl", "delete", "ns", testNamespace, "--ignore-not-found")
-		_, _ = utils.Run(cmd)
-
-		By("cleaning up the curl pod for metrics")
-		cmd = exec.Command("kubectl", "delete", "pod", "curl-metrics", "-n", namespace)
-		_, _ = utils.Run(cmd)
-
-		By("cleaning up e2e Runner and Job resources across namespaces")
-		cmd = exec.Command("kubectl", "delete", "runner", "--all", "-n", testNamespace, "--ignore-not-found")
-		_, _ = utils.Run(cmd)
-		cmd = exec.Command("kubectl", "delete", "job", "--all", "-n", testNamespace, "--ignore-not-found")
+		By("force-deleting the controller pod to skip termination grace period")
+		cmd = exec.Command("kubectl", "delete", "pod", "-n", namespace,
+			"-l", "control-plane=controller-manager",
+			"--force", "--grace-period=0", "--ignore-not-found")
 		_, _ = utils.Run(cmd)
 
 		By("undeploying the controller-manager")
@@ -132,7 +124,7 @@ var _ = Describe("Manager", Ordered, func() {
 		}
 	})
 
-	SetDefaultEventuallyTimeout(2 * time.Minute)
+	SetDefaultEventuallyTimeout(30 * time.Second)
 	SetDefaultEventuallyPollingInterval(time.Second)
 
 	Context("Manager", func() {
@@ -195,7 +187,7 @@ var _ = Describe("Manager", Ordered, func() {
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(Equal("True"), "Controller pod not ready")
 			}
-			Eventually(verifyControllerPodReady, 3*time.Minute, time.Second).Should(Succeed())
+			Eventually(verifyControllerPodReady, 30*time.Second, time.Second).Should(Succeed())
 
 			By("verifying that the controller manager is serving the metrics server")
 			verifyMetricsServerStarted := func(g Gomega) {
@@ -205,7 +197,7 @@ var _ = Describe("Manager", Ordered, func() {
 				g.Expect(output).To(ContainSubstring("Serving metrics server"),
 					"Metrics server not yet started")
 			}
-			Eventually(verifyMetricsServerStarted, 3*time.Minute, time.Second).Should(Succeed())
+			Eventually(verifyMetricsServerStarted, 30*time.Second, time.Second).Should(Succeed())
 
 			By("creating the curl-metrics pod to access the metrics endpoint")
 			cmd = exec.Command("kubectl", "run", "curl-metrics", "--restart=Never",
@@ -249,7 +241,7 @@ var _ = Describe("Manager", Ordered, func() {
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(Equal("Succeeded"), "curl pod in wrong status")
 			}
-			Eventually(verifyCurlUp, 5*time.Minute).Should(Succeed())
+			Eventually(verifyCurlUp, 60*time.Second).Should(Succeed())
 
 			By("getting the metrics by checking curl-metrics logs")
 			verifyMetricsAvailable := func(g Gomega) {
@@ -258,7 +250,11 @@ var _ = Describe("Manager", Ordered, func() {
 				g.Expect(metricsOutput).NotTo(BeEmpty())
 				g.Expect(metricsOutput).To(ContainSubstring("< HTTP/1.1 200 OK"))
 			}
-			Eventually(verifyMetricsAvailable, 2*time.Minute).Should(Succeed())
+			Eventually(verifyMetricsAvailable, 30*time.Second).Should(Succeed())
+
+			By("cleaning up the curl-metrics pod")
+			cmd = exec.Command("kubectl", "delete", "pod", "curl-metrics", "-n", namespace, "--ignore-not-found")
+			_, _ = utils.Run(cmd)
 		})
 	})
 
@@ -315,7 +311,7 @@ spec:
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(Equal("Succeeded"))
 			}
-			Eventually(verifyRunnerSucceeded, 3*time.Minute).Should(Succeed())
+			Eventually(verifyRunnerSucceeded, 30*time.Second).Should(Succeed())
 
 			By("verifying the Job has an init container for git clone")
 			verifyInitContainer := func(g Gomega) {
@@ -389,7 +385,7 @@ spec:
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(Equal("Succeeded"))
 			}
-			Eventually(verifyRunnerSucceeded, 3*time.Minute).Should(Succeed())
+			Eventually(verifyRunnerSucceeded, 30*time.Second).Should(Succeed())
 
 			By("verifying the Job also completed")
 			verifyJobSucceeded := func(g Gomega) {
@@ -443,7 +439,7 @@ spec:
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(Equal("Failed"))
 			}
-			Eventually(verifyRunnerFailed, 3*time.Minute).Should(Succeed())
+			Eventually(verifyRunnerFailed, 30*time.Second).Should(Succeed())
 
 			By("verifying the Job also reports failure")
 			verifyJobFailed := func(g Gomega) {
@@ -497,7 +493,7 @@ spec:
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(Equal("Succeeded"))
 			}
-			Eventually(verifyRunnerSucceeded, 3*time.Minute).Should(Succeed())
+			Eventually(verifyRunnerSucceeded, 30*time.Second).Should(Succeed())
 
 			By("recording the old Job UID")
 			getOldJobUID := func() string {
@@ -537,7 +533,7 @@ spec:
 				g.Expect(newUID).NotTo(BeEmpty())
 				g.Expect(newUID).NotTo(Equal(oldUID), "Job should have been recreated with a new UID")
 			}
-			Eventually(verifyJobRecreated, 3*time.Minute).Should(Succeed())
+			Eventually(verifyJobRecreated, 30*time.Second).Should(Succeed())
 
 			By("verifying Runner eventually succeeds again with new spec")
 			verifyRunnerSucceededAgain := func(g Gomega) {
@@ -547,7 +543,7 @@ spec:
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(Equal("Succeeded"))
 			}
-			Eventually(verifyRunnerSucceededAgain, 3*time.Minute).Should(Succeed())
+			Eventually(verifyRunnerSucceededAgain, 30*time.Second).Should(Succeed())
 		})
 	})
 
@@ -612,7 +608,7 @@ spec:
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(Equal("Succeeded"))
 			}
-			Eventually(verifyStepOneSucceeded, 3*time.Minute).Should(Succeed())
+			Eventually(verifyStepOneSucceeded, 30*time.Second).Should(Succeed())
 
 			By("waiting for step-two Runner to be created (depends on step-one)")
 			stepTwoRunner := fmt.Sprintf("%s-step-two", workflowName)
@@ -633,7 +629,7 @@ spec:
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(Equal("Succeeded"))
 			}
-			Eventually(verifyStepTwoSucceeded, 3*time.Minute).Should(Succeed())
+			Eventually(verifyStepTwoSucceeded, 30*time.Second).Should(Succeed())
 
 			By("verifying the Workflow status is Succeeded")
 			verifyWorkflowSucceeded := func(g Gomega) {
@@ -703,7 +699,7 @@ spec:
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(Equal("Failed"))
 			}
-			Eventually(verifyWorkflowFailed, 2*time.Minute).Should(Succeed())
+			Eventually(verifyWorkflowFailed, 30*time.Second).Should(Succeed())
 
 			By("verifying the completionTime is set")
 			verifyCompletionTime := func(g Gomega) {
@@ -778,7 +774,7 @@ spec:
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(Equal("Failed"))
 			}
-			Eventually(verifyFailStepFailed, 3*time.Minute).Should(Succeed())
+			Eventually(verifyFailStepFailed, 30*time.Second).Should(Succeed())
 
 			By("waiting for cleanup-step Runner to be created")
 			cleanupStepRunner := fmt.Sprintf("%s-cleanup-step", wfName)
@@ -799,7 +795,7 @@ spec:
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(output).To(Equal("Succeeded"))
 			}
-			Eventually(verifyCleanupSucceeded, 3*time.Minute).Should(Succeed())
+			Eventually(verifyCleanupSucceeded, 30*time.Second).Should(Succeed())
 
 			By("verifying the Workflow status is Failed (at least one step failed)")
 			verifyWorkflowFailed := func(g Gomega) {

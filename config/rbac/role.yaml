@@ -8,6 +8,7 @@ rules:
   - ""
   resources:
   - pods
+  - secrets
   verbs:
   - get
   - list
@@ -40,6 +41,7 @@ rules:
 - apiGroups:
   - runners.runner-operator.io
   resources:
+  - eventtriggers
   - runners
   - workflows
   verbs:
@@ -53,6 +55,7 @@ rules:
 - apiGroups:
   - runners.runner-operator.io
   resources:
+  - eventtriggers/status
   - runners/status
   - workflows/status
   verbs:

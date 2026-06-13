@@ -46,6 +46,16 @@ func (r *WorkflowReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, nil
 	}
 
+	// Dispatch: job-based or flat-step workflow
+	if len(wf.Spec.Jobs) > 0 {
+		return r.reconcileJobWorkflow(ctx, wf)
+	}
+	return r.reconcileFlatWorkflow(ctx, wf)
+}
+
+func (r *WorkflowReconciler) reconcileFlatWorkflow(ctx context.Context, wf *runnersv1alpha1.Workflow) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
 	if len(wf.Spec.Steps) == 0 {
 		r.Recorder.Event(wf, corev1.EventTypeWarning, "NoSteps", "Workflow has no steps defined")
 		return ctrl.Result{}, nil
@@ -62,7 +72,7 @@ func (r *WorkflowReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if wf.Spec.Timeout != nil && !isWorkflowTerminal(wf.Status.Phase) && wf.Status.StartTime != nil {
 		elapsed := time.Since(wf.Status.StartTime.Time)
 		if elapsed > wf.Spec.Timeout.Duration {
-			return r.handleTimeout(ctx, wf, elapsed)
+			return r.handleTimeoutFlat(ctx, wf, elapsed)
 		}
 	}
 
@@ -81,7 +91,7 @@ func (r *WorkflowReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	updated = r.reconcileSteps(ctx, wf, stepRunners) || updated
 
-	newPhase := computeWorkflowPhase(wf)
+	newPhase := computeFlatWorkflowPhase(wf)
 	if newPhase != wf.Status.Phase {
 		r.Recorder.Eventf(wf, corev1.EventTypeNormal, "PhaseChanged", "Workflow phase changed to %s", newPhase)
 		wf.Status.Phase = newPhase
@@ -120,7 +130,7 @@ func (r *WorkflowReconciler) listStepRunners(ctx context.Context, wf *runnersv1a
 	return runnerList.Items, nil
 }
 
-func (r *WorkflowReconciler) handleTimeout(ctx context.Context, wf *runnersv1alpha1.Workflow, elapsed time.Duration) (ctrl.Result, error) {
+func (r *WorkflowReconciler) handleTimeoutFlat(ctx context.Context, wf *runnersv1alpha1.Workflow, elapsed time.Duration) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("Workflow timed out", "timeout", wf.Spec.Timeout.Duration, "elapsed", elapsed)
 	r.Recorder.Event(wf, corev1.EventTypeWarning, "TimedOut", "Workflow timed out")
@@ -129,6 +139,31 @@ func (r *WorkflowReconciler) handleTimeout(ctx context.Context, wf *runnersv1alp
 
 	for _, step := range wf.Spec.Steps {
 		upsertStepStatus(wf, step.Name, runnersv1alpha1.StepPhaseFailed)
+	}
+
+	wf.Status.Phase = runnersv1alpha1.WorkflowPhaseFailed
+	now := metav1.Now()
+	wf.Status.CompletionTime = &now
+	wf.Status.ObservedGeneration = wf.Generation
+
+	if err := r.Status().Patch(ctx, wf, patchBase); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
+func (r *WorkflowReconciler) handleTimeoutJobs(ctx context.Context, wf *runnersv1alpha1.Workflow, elapsed time.Duration) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	logger.Info("Workflow timed out", "timeout", wf.Spec.Timeout.Duration, "elapsed", elapsed)
+	r.Recorder.Event(wf, corev1.EventTypeWarning, "TimedOut", "Workflow timed out")
+
+	patchBase := client.MergeFrom(wf.DeepCopy())
+
+	for _, job := range wf.Spec.Jobs {
+		upsertJobStatus(wf, job.Name, runnersv1alpha1.JopPhaseFailed)
+		for _, step := range job.Steps {
+			upsertStepStatus(wf, step.Name, runnersv1alpha1.StepPhaseFailed)
+		}
 	}
 
 	wf.Status.Phase = runnersv1alpha1.WorkflowPhaseFailed
@@ -241,6 +276,8 @@ func (r *WorkflowReconciler) reconcileSteps(ctx context.Context, wf *runnersv1al
 type stepDecision int
 
 const (
+	defaultWhen = "on_success"
+
 	stepSkip stepDecision = iota
 	stepWait
 	stepRun
@@ -256,7 +293,7 @@ func evaluateStep(step runnersv1alpha1.WorkflowStep, stepStatusMap map[string]ru
 
 	when := strings.TrimSpace(step.When)
 	if when == "" {
-		when = "on_success"
+		when = defaultWhen
 	}
 
 	allDepSucceeded := true
@@ -276,7 +313,7 @@ func evaluateStep(step runnersv1alpha1.WorkflowStep, stepStatusMap map[string]ru
 			return stepRun
 		}
 		return stepSkip
-	case "on_success":
+	case defaultWhen:
 		fallthrough
 	default:
 		if allDepSucceeded {
@@ -468,7 +505,487 @@ func upsertStepStatus(wf *runnersv1alpha1.Workflow, stepName string, phase runne
 	wf.Status.StepStatuses = append(wf.Status.StepStatuses, status)
 }
 
-func computeWorkflowPhase(wf *runnersv1alpha1.Workflow) runnersv1alpha1.WorkflowPhase {
+// ─── Job-based reconciler ────────────────────────────────────────────────
+
+func (r *WorkflowReconciler) reconcileJobWorkflow(ctx context.Context, wf *runnersv1alpha1.Workflow) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	if len(wf.Spec.Jobs) == 0 {
+		r.Recorder.Event(wf, corev1.EventTypeWarning, "NoJobs", "Workflow has no jobs defined")
+		return ctrl.Result{}, nil
+	}
+
+	if cycle := detectJobCycle(wf.Spec.Jobs); cycle != "" {
+		logger.Info("Cycle detected in workflow jobs", "cycle", cycle)
+		r.Recorder.Eventf(wf, corev1.EventTypeWarning, "CycleDetected", "Job dependency cycle detected: %s", cycle)
+		return ctrl.Result{}, nil
+	}
+
+	updated := false
+
+	if wf.Spec.Timeout != nil && !isWorkflowTerminal(wf.Status.Phase) && wf.Status.StartTime != nil {
+		elapsed := time.Since(wf.Status.StartTime.Time)
+		if elapsed > wf.Spec.Timeout.Duration {
+			return r.handleTimeoutJobs(ctx, wf, elapsed)
+		}
+	}
+
+	allRunners, err := r.listStepRunners(ctx, wf)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	patchBase := client.MergeFrom(wf.DeepCopy())
+
+	if wf.Status.StartTime == nil {
+		now := metav1.Now()
+		wf.Status.StartTime = &now
+		updated = true
+	}
+
+	jobStatusMap := buildJobStatusMap(wf)
+
+	for i := range wf.Spec.Jobs {
+		jobUpdated := r.reconcileJob(ctx, wf, &wf.Spec.Jobs[i], allRunners, jobStatusMap)
+		updated = updated || jobUpdated
+	}
+
+	newPhase := computeJobWorkflowPhase(wf)
+	if newPhase != wf.Status.Phase {
+		r.Recorder.Eventf(wf, corev1.EventTypeNormal, "PhaseChanged", "Workflow phase changed to %s", newPhase)
+		wf.Status.Phase = newPhase
+		updated = true
+	}
+	if isWorkflowTerminal(wf.Status.Phase) && wf.Status.CompletionTime == nil {
+		now := metav1.Now()
+		wf.Status.CompletionTime = &now
+		updated = true
+	}
+
+	if updated {
+		wf.Status.ObservedGeneration = wf.Generation
+		if err := r.Status().Patch(ctx, wf, patchBase); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	if !isWorkflowTerminal(wf.Status.Phase) && wf.Spec.Timeout != nil && wf.Status.StartTime != nil {
+		elapsed := time.Since(wf.Status.StartTime.Time)
+		remaining := wf.Spec.Timeout.Duration - elapsed
+		if remaining > 0 {
+			return ctrl.Result{RequeueAfter: remaining}, nil
+		}
+	}
+	return ctrl.Result{}, nil
+}
+
+func (r *WorkflowReconciler) reconcileJob(ctx context.Context, wf *runnersv1alpha1.Workflow, job *runnersv1alpha1.JobSpec, allRunners []runnersv1alpha1.Runner, jobStatusMap map[string]runnersv1alpha1.JobStatus) bool {
+	updated := false
+
+	js, hasStatus := jobStatusMap[job.Name]
+
+	if hasStatus {
+		switch js.Phase {
+		case runnersv1alpha1.JopPhaseSucceeded, runnersv1alpha1.JopPhaseFailed, runnersv1alpha1.JopPhaseSkipped:
+			return false
+		}
+	}
+
+	decision := evaluateJobWhen(job, jobStatusMap)
+
+	switch decision {
+	case jobSkip:
+		if !hasStatus {
+			upsertJobStatus(wf, job.Name, runnersv1alpha1.JopPhaseSkipped)
+			return true
+		}
+		return false
+
+	case jobWait:
+		if !hasStatus || js.Phase != runnersv1alpha1.JopPhaseWaiting {
+			upsertJobStatus(wf, job.Name, runnersv1alpha1.JopPhaseWaiting)
+			updated = true
+		}
+		return updated
+
+	case jobRun:
+		if !hasStatus || js.Phase != runnersv1alpha1.JopPhaseRunning {
+			upsertJobStatus(wf, job.Name, runnersv1alpha1.JopPhaseRunning)
+			updated = true
+		}
+
+		stepRunners := filterRunnersByJob(allRunners, job.Name)
+		stepUpdated := r.reconcileJobSteps(ctx, wf, job, stepRunners)
+		updated = updated || stepUpdated
+
+		stepStatusMap := buildStepStatusMap(wf)
+		allDone := true
+		hasFailed := false
+		for _, step := range job.Steps {
+			st, found := stepStatusMap[step.Name]
+			if !found {
+				allDone = false
+				continue
+			}
+			switch st.Phase {
+			case runnersv1alpha1.StepPhasePending, runnersv1alpha1.StepPhaseWaiting, runnersv1alpha1.StepPhaseRunning:
+				allDone = false
+			case runnersv1alpha1.StepPhaseFailed:
+				hasFailed = true
+			}
+		}
+
+		if allDone {
+			if hasFailed {
+				upsertJobStatus(wf, job.Name, runnersv1alpha1.JopPhaseFailed)
+			} else {
+				upsertJobStatus(wf, job.Name, runnersv1alpha1.JopPhaseSucceeded)
+			}
+			updated = true
+		}
+	}
+
+	return updated
+}
+
+func (r *WorkflowReconciler) reconcileJobSteps(ctx context.Context, wf *runnersv1alpha1.Workflow, job *runnersv1alpha1.JobSpec, stepRunners []runnersv1alpha1.Runner) bool {
+	logger := log.FromContext(ctx)
+	updated := false
+
+	stepStatusMap := buildStepStatusMap(wf)
+	runnerMap := buildRunnerMap(stepRunners)
+
+	for _, step := range job.Steps {
+		existing, hasRunner := runnerMap[step.Name]
+		status, hasStatus := stepStatusMap[step.Name]
+
+		if hasStatus {
+			switch status.Phase {
+			case runnersv1alpha1.StepPhaseSucceeded, runnersv1alpha1.StepPhaseFailed, runnersv1alpha1.StepPhaseSkipped:
+				if hasRunner {
+					continue
+				}
+			}
+		}
+
+		decision := evaluateStep(step, stepStatusMap)
+
+		switch decision {
+		case stepSkip:
+			if !hasStatus {
+				wf.Status.StepStatuses = append(wf.Status.StepStatuses, runnersv1alpha1.StepStatus{
+					Name:    step.Name,
+					Phase:   runnersv1alpha1.StepPhaseSkipped,
+					Message: fmt.Sprintf("Dependencies did not meet the required condition (when: %q)", step.When),
+				})
+				updated = true
+			}
+			continue
+
+		case stepWait:
+			if !hasStatus {
+				wf.Status.StepStatuses = append(wf.Status.StepStatuses, runnersv1alpha1.StepStatus{
+					Name:  step.Name,
+					Phase: runnersv1alpha1.StepPhaseWaiting,
+				})
+				updated = true
+			}
+			continue
+
+		case stepRun:
+			if !hasRunner {
+				runner := r.buildJobStepRunner(ctx, wf, job, &step)
+				if err := controllerutil.SetControllerReference(wf, runner, r.Scheme); err != nil {
+					logger.Error(err, "Failed to set owner reference", "step", step.Name, "job", job.Name)
+					continue
+				}
+				logger.Info("Creating Runner for step", "step", step.Name, "job", job.Name)
+				r.Recorder.Eventf(wf, corev1.EventTypeNormal, "StepRunnerCreated", "Created Runner for step %q in job %q", step.Name, job.Name)
+				if err := r.Create(ctx, runner); err != nil {
+					logger.Error(err, "Failed to create Runner", "step", step.Name, "job", job.Name)
+					continue
+				}
+				wf.Status.StepStatuses = append(wf.Status.StepStatuses, runnersv1alpha1.StepStatus{
+					Name:    step.Name,
+					Phase:   runnersv1alpha1.StepPhasePending,
+					Message: "Runner created",
+				})
+				updated = true
+			} else {
+				stepPhase := runnerPhaseToStepPhase(existing.Status.Phase)
+				if stepPhase == runnersv1alpha1.StepPhaseFailed &&
+					step.Retry != nil && step.Retry.MaxRetries > 0 &&
+					status.RetryCount < step.Retry.MaxRetries {
+					if !retryBackoffElapsed(&step, &status) {
+						continue
+					}
+					logger.Info("Step failed, retrying", "step", step.Name, "job", job.Name, "attempt", status.RetryCount+1)
+					r.Recorder.Eventf(wf, corev1.EventTypeNormal, "StepRetrying", "Step %q in job %q failed, retrying (attempt %d/%d)", step.Name, job.Name, status.RetryCount+1, step.Retry.MaxRetries)
+					if err := r.Delete(ctx, &existing); err != nil {
+						logger.Error(err, "Failed to delete failed Runner for retry", "step", step.Name, "job", job.Name)
+					}
+					stepPhase = runnersv1alpha1.StepPhasePending
+					upsertStepStatus(wf, step.Name, stepPhase)
+					for i, s := range wf.Status.StepStatuses {
+						if s.Name == step.Name {
+							wf.Status.StepStatuses[i].RetryCount++
+							break
+						}
+					}
+					updated = true
+				} else if !hasStatus || status.Phase != stepPhase {
+					upsertStepStatus(wf, step.Name, stepPhase)
+					updated = true
+				}
+			}
+		}
+	}
+
+	return updated
+}
+
+func (r *WorkflowReconciler) buildJobStepRunner(ctx context.Context, wf *runnersv1alpha1.Workflow, job *runnersv1alpha1.JobSpec, step *runnersv1alpha1.WorkflowStep) *runnersv1alpha1.Runner {
+	runner := r.buildStepRunner(ctx, wf, step)
+
+	runner.Labels["runner-operator.io/job"] = job.Name
+
+	if len(job.Env) > 0 {
+		runner.Spec.Env = append(job.Env, runner.Spec.Env...)
+	}
+
+	if job.GitRepo != nil && runner.Spec.GitRepo == nil {
+		runner.Spec.GitRepo = job.GitRepo
+	}
+
+	if job.SharedVolume != nil && job.SharedVolume.EmptyDir != nil {
+		mountPath := "/workspace"
+		if job.SharedVolume.MountPath != "" {
+			mountPath = job.SharedVolume.MountPath
+		}
+		volName := "job-shared-volume"
+		runner.Spec.Volumes = append(runner.Spec.Volumes, corev1.Volume{
+			Name: volName,
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: job.SharedVolume.EmptyDir,
+			},
+		})
+		runner.Spec.Mounts = append(runner.Spec.Mounts, corev1.VolumeMount{
+			Name:      volName,
+			MountPath: mountPath,
+		})
+	}
+
+	if job.SharedVolume != nil && job.SharedVolume.PersistentVolumeClaim != nil {
+		mountPath := "/workspace"
+		if job.SharedVolume.MountPath != "" {
+			mountPath = job.SharedVolume.MountPath
+		}
+		volName := "job-shared-volume"
+		runner.Spec.Volumes = append(runner.Spec.Volumes, corev1.Volume{
+			Name: volName,
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: job.SharedVolume.PersistentVolumeClaim,
+			},
+		})
+		runner.Spec.Mounts = append(runner.Spec.Mounts, corev1.VolumeMount{
+			Name:      volName,
+			MountPath: mountPath,
+		})
+	}
+
+	return runner
+}
+
+// ─── Job helpers ─────────────────────────────────────────────────────────
+
+func detectJobCycle(jobs []runnersv1alpha1.JobSpec) string {
+	jobNames := map[string]bool{}
+	for _, j := range jobs {
+		jobNames[j.Name] = true
+	}
+
+	for _, j := range jobs {
+		for _, need := range j.Needs {
+			if !jobNames[need] {
+				return fmt.Sprintf("job %q depends on unknown job %q", j.Name, need)
+			}
+		}
+	}
+
+	visited := map[string]int{}
+	var dfs func(name string) bool
+	dfs = func(name string) bool {
+		if visited[name] == 1 {
+			return true
+		}
+		if visited[name] == 2 {
+			return false
+		}
+		visited[name] = 1
+		for _, j := range jobs {
+			if j.Name == name {
+				if slices.ContainsFunc(j.Needs, dfs) {
+					return true
+				}
+				break
+			}
+		}
+		visited[name] = 2
+		return false
+	}
+
+	for _, j := range jobs {
+		if dfs(j.Name) {
+			return fmt.Sprintf("cycle detected involving job %q", j.Name)
+		}
+	}
+	return ""
+}
+
+type jobDecision int
+
+const (
+	jobSkip jobDecision = iota
+	jobWait
+	jobRun
+)
+
+func evaluateJobWhen(job *runnersv1alpha1.JobSpec, jobStatusMap map[string]runnersv1alpha1.JobStatus) jobDecision {
+	for _, need := range job.Needs {
+		js, ok := jobStatusMap[need]
+		if !ok {
+			return jobWait
+		}
+		switch js.Phase {
+		case runnersv1alpha1.JopPhasePending, runnersv1alpha1.JopPhaseRunning, runnersv1alpha1.JopPhaseWaiting:
+			return jobWait
+		}
+	}
+
+	when := strings.TrimSpace(job.When)
+	if when == "" {
+		when = defaultWhen
+	}
+
+	allSucceeded := true
+	for _, need := range job.Needs {
+		js := jobStatusMap[need]
+		if js.Phase != runnersv1alpha1.JopPhaseSucceeded {
+			allSucceeded = false
+			break
+		}
+	}
+
+	switch when {
+	case "always":
+		return jobRun
+	case "on_failure":
+		if !allSucceeded {
+			return jobRun
+		}
+		return jobSkip
+	case defaultWhen:
+		fallthrough
+	default:
+		if allSucceeded {
+			return jobRun
+		}
+		return jobSkip
+	}
+}
+
+func buildJobStatusMap(wf *runnersv1alpha1.Workflow) map[string]runnersv1alpha1.JobStatus {
+	m := map[string]runnersv1alpha1.JobStatus{}
+	for _, j := range wf.Status.JobStatuses {
+		m[j.Name] = j
+	}
+	return m
+}
+
+func upsertJobStatus(wf *runnersv1alpha1.Workflow, jobName string, phase runnersv1alpha1.JopPhase) {
+	for i, j := range wf.Status.JobStatuses {
+		if j.Name == jobName {
+			if j.Phase != phase {
+				wf.Status.JobStatuses[i].Phase = phase
+				if phase == runnersv1alpha1.JopPhaseRunning {
+					if j.StartedAt == nil {
+						now := metav1.Now()
+						wf.Status.JobStatuses[i].StartedAt = &now
+					}
+					wf.Status.JobStatuses[i].CompletedAt = nil
+				}
+				if phase == runnersv1alpha1.JopPhaseSucceeded || phase == runnersv1alpha1.JopPhaseFailed || phase == runnersv1alpha1.JopPhaseSkipped {
+					now := metav1.Now()
+					wf.Status.JobStatuses[i].CompletedAt = &now
+				}
+			}
+			return
+		}
+	}
+	status := runnersv1alpha1.JobStatus{Name: jobName, Phase: phase}
+	if phase == runnersv1alpha1.JopPhaseRunning {
+		now := metav1.Now()
+		status.StartedAt = &now
+	}
+	wf.Status.JobStatuses = append(wf.Status.JobStatuses, status)
+}
+
+func filterRunnersByJob(runners []runnersv1alpha1.Runner, jobName string) []runnersv1alpha1.Runner {
+	var filtered []runnersv1alpha1.Runner
+	for _, r := range runners {
+		if jn, ok := r.Labels["runner-operator.io/job"]; ok && jn == jobName {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered
+}
+
+func computeJobWorkflowPhase(wf *runnersv1alpha1.Workflow) runnersv1alpha1.WorkflowPhase {
+	if len(wf.Status.JobStatuses) == 0 {
+		return runnersv1alpha1.WorkflowPhasePending
+	}
+
+	allDone := true
+	hasFailed := false
+	hasRunning := false
+
+	for _, job := range wf.Spec.Jobs {
+		js, found := findJobStatus(wf.Status.JobStatuses, job.Name)
+		if !found {
+			allDone = false
+			continue
+		}
+		switch js.Phase {
+		case runnersv1alpha1.JopPhasePending, runnersv1alpha1.JopPhaseWaiting, runnersv1alpha1.JopPhaseRunning:
+			allDone = false
+			hasRunning = true
+		case runnersv1alpha1.JopPhaseFailed:
+			hasFailed = true
+		}
+	}
+
+	if hasFailed && allDone {
+		return runnersv1alpha1.WorkflowPhaseFailed
+	}
+	if allDone {
+		return runnersv1alpha1.WorkflowPhaseSucceeded
+	}
+	if hasRunning {
+		return runnersv1alpha1.WorkflowPhaseRunning
+	}
+	return runnersv1alpha1.WorkflowPhasePending
+}
+
+func findJobStatus(statuses []runnersv1alpha1.JobStatus, name string) (runnersv1alpha1.JobStatus, bool) {
+	for _, j := range statuses {
+		if j.Name == name {
+			return j, true
+		}
+	}
+	return runnersv1alpha1.JobStatus{}, false
+}
+
+func computeFlatWorkflowPhase(wf *runnersv1alpha1.Workflow) runnersv1alpha1.WorkflowPhase {
 	if len(wf.Status.StepStatuses) == 0 {
 		return runnersv1alpha1.WorkflowPhasePending
 	}

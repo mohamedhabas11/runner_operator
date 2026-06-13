@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/name: runner-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: webhook-event-server
+  namespace: system
+spec:
+  ports:
+  - name: webhook-event
+    port: 80
+    protocol: TCP
+    targetPort: webhook-event
+  selector:
+    control-plane: controller-manager
+    app.kubernetes.io/name: runner-operator

@@ -101,17 +101,104 @@ type WorkflowStep struct {
 	GitRepo *GitRepo `json:"gitRepo,omitempty"`
 }
 
-// WorkflowSpec defines the desired state of Workflow.
-type WorkflowSpec struct {
-	// Steps defines the ordered steps of the workflow.
+// JopPhase is a label for the current lifecycle phase of a workflow job.
+type JopPhase string
+
+const (
+	JopPhasePending   JopPhase = "Pending"
+	JopPhaseRunning   JopPhase = "Running"
+	JopPhaseSucceeded JopPhase = "Succeeded"
+	JopPhaseFailed    JopPhase = "Failed"
+	JopPhaseSkipped   JopPhase = "Skipped"
+	JopPhaseWaiting   JopPhase = "Waiting"
+)
+
+// SharedVolume defines a volume shared between steps in a job group.
+type SharedVolume struct {
+	// MountPath is the path to mount the shared volume. Defaults to "/workspace".
+	// +optional
+	// +kubebuilder:default="/workspace"
+	MountPath string `json:"mountPath,omitempty"`
+
+	// EmptyDir configures an emptyDir volume.
+	// +optional
+	EmptyDir *corev1.EmptyDirVolumeSource `json:"emptyDir,omitempty"`
+
+	// PersistentVolumeClaim configures a PVC volume.
+	// +optional
+	PersistentVolumeClaim *corev1.PersistentVolumeClaimVolumeSource `json:"persistentVolumeClaim,omitempty"`
+}
+
+// JobSpec defines a group of steps that share state and execute together.
+type JobSpec struct {
+	// Name of the job; must be unique within the workflow.
+	// +required
+	Name string `json:"name"`
+
+	// Needs lists job names that must complete before this job starts.
+	// +optional
+	Needs []string `json:"needs,omitempty"`
+
+	// When controls whether this job runs based on its dependency results.
+	// Accepted values: "on_success" (default), "on_failure", "always".
+	// +optional
+	When string `json:"when,omitempty"`
+
+	// Env defines environment variables for all steps in this job.
+	// +optional
+	Env []corev1.EnvVar `json:"env,omitempty"`
+
+	// GitRepo defines a Git repository to clone before executing each step.
+	// +optional
+	GitRepo *GitRepo `json:"gitRepo,omitempty"`
+
+	// SharedVolume defines a volume shared between all steps in this job.
+	// +optional
+	SharedVolume *SharedVolume `json:"sharedVolume,omitempty"`
+
+	// Steps defines the ordered steps of the job.
 	// +listType=map
 	// +listMapKey=name
 	// +required
 	Steps []WorkflowStep `json:"steps"`
+}
+
+// WorkflowSpec defines the desired state of Workflow.
+type WorkflowSpec struct {
+	// Jobs defines parallel job groups. Supersedes the flat steps field.
+	// When set, the flat steps field is ignored.
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	Jobs []JobSpec `json:"jobs,omitempty"`
+
+	// Steps defines the ordered steps of the workflow (flat mode).
+	// Ignored when jobs is set. Kept for backward compatibility.
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	Steps []WorkflowStep `json:"steps,omitempty"`
 
 	// Timeout for the entire workflow execution.
 	// +optional
 	Timeout *metav1.Duration `json:"timeout,omitempty"`
+}
+
+// JobStatus tracks the execution status of an individual workflow job.
+type JobStatus struct {
+	// Name of the job.
+	Name string `json:"name"`
+
+	// Phase of the job execution.
+	Phase JopPhase `json:"phase"`
+
+	// StartedAt is when the job started.
+	// +optional
+	StartedAt *metav1.Time `json:"startedAt,omitempty"`
+
+	// CompletedAt is when the job finished.
+	// +optional
+	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
 }
 
 // StepStatus tracks the execution status of an individual workflow step.
@@ -150,6 +237,10 @@ type WorkflowStatus struct {
 	// Phase is the current lifecycle phase of the workflow.
 	// +optional
 	Phase WorkflowPhase `json:"phase,omitempty"`
+
+	// JobStatuses tracks the status of each workflow job.
+	// +optional
+	JobStatuses []JobStatus `json:"jobStatuses,omitempty"`
 
 	// StepStatuses tracks the status of each workflow step.
 	// +optional

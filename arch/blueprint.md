@@ -416,6 +416,228 @@ No finalizer logic needed.  `BackoffLimit: 0` on Jobs ensures the operator
 
 ---
 
+---
+
+## New: Event-Driven Triggers
+
+The operator can now react to external events (GitHub webhooks) and create Workflow CRs
+automatically.  This is the system's equivalent of GitHub Actions `on: [push, pull_request]`.
+
+### Architecture
+
+```
+.──────────────────────────────────────────────────────────────────────.
+│                         Kubernetes Cluster                          │
+│                                                                      │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │                 Manager Pod (controller-manager)              │    │
+│  │  ┌──────────────┐  ┌────────────────┐  ┌──────────────────┐ │    │
+│  │  │ Runner       │  │ Workflow       │  │ EventTrigger     │ │    │
+│  │  │ Controller   │  │ Controller     │  │ Controller       │ │    │
+│  │  └──────────────┘  └────────────────┘  └──────────────────┘ │    │
+│  │                                                              │    │
+│  │  ┌──────────────────────────────────────────────────────┐   │    │
+│  │  │ Webhook Server (port 8080)                          │   │    │
+│  │  │  ┌──────────────────────┐  ┌──────────────────────┐  │   │    │
+│  │  │  │ /webhooks/github     │  │ /webhooks/generic    │  │   │    │
+│  │  │  │ → HMAC validation    │  │ → payload parsing    │  │   │    │
+│  │  │  │ → parameter extract  │  │ → CR creation        │  │   │    │
+│  │  │  └──────────────────────┘  └──────────────────────┘  │   │    │
+│  │  └──────────────────────────────────────────────────────┘   │    │
+│  └─────────────────────────────────────────────────────────────┘    │
+│                                                                      │
+│  ┌──────────────┐  ┌──────────────────┐  ┌──────────────────────┐  │
+│  │ EventTrigger  │  │ Workflow (with   │  │ Ingress              │  │
+│  │ CR            │  │ Jobs) CR         │  │ → /webhooks/*        │  │
+│  │ ──────────────  │ ─────────────────  │  └──────────────────────┘  │
+│  │ webhook:       │  │ jobs:            │                            │
+│  │   path, secret │  │  - name: build  │                            │
+│  │ workflowRef    │  │    steps: [...] │                            │
+│  │ parameters     │  │  - name: test   │                            │
+│  └──────────────┘  │    needs: [build] │                            │
+│                    └──────────────────┘                            │
+'──────────────────────────────────────────────────────────────────────'
+
+External GitHub Webhook
+  ── HTTPS ──▶ Ingress ──▶ Service ──▶ /webhooks/github ──▶ Create Workflow CR
+```
+
+### CRD: EventTrigger
+
+```yaml
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: EventTrigger
+metadata:
+  name: github-push-trigger
+spec:
+  webhook:
+    path: /webhooks/github-push        # unique path on the webhook server
+    secretRef:                         # HMAC secret for payload validation
+      name: github-webhook-secret
+  workflowTemplate:
+    name: ci-workflow                  # template Workflow CR to instantiate
+    namespace: default
+  parameters:                          # optional: map webhook JSON → workflow env vars
+    - name: GITHUB_REF
+      source: $.ref                    # dot-path from webhook payload
+    - name: GITHUB_REPO
+      source: $.repository.full_name
+    - name: GITHUB_SHA
+      source: $.after
+```
+
+**Behaviour:**
+- Each `EventTrigger` registers a handler at `spec.webhook.path` on the internal webhook server (port 8080)
+- On receiving a POST to that path, validates the HMAC signature against the referenced Secret
+- Parses the JSON payload, extracts parameters via dot-path selectors
+- Creates a new Workflow CR from the template, injecting extracted values as env vars in env step
+- Responds `202 Accepted` on success, `401 Unauthorized` on HMAC mismatch, `400` on bad payload
+
+### Webhook Server
+
+- Runs inside the manager binary on port **8080** (separate from admission webhooks on 9443)
+- No TLS — TLS termination handled at the Ingress
+- Routes are registered/deregistered dynamically as EventTrigger CRs are created/updated/deleted
+- GitHub webhook handler: validates HMAC-SHA256 with the Secret key, parses push/pull_request/release events
+- Generic handler: for any other webhooks with custom authentication
+
+### Service & Ingress
+
+```yaml
+# Service (config/webhook/service.yaml)
+apiVersion: v1
+kind: Service
+metadata:
+  name: webhook-server
+spec:
+  selector:
+    control-plane: controller-manager
+  ports:
+    - port: 80
+      targetPort: 8080
+      name: webhook
+
+# Ingress (config/webhook/ingress.yaml)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: webhook-ingress
+spec:
+  rules:
+    - host: webhooks.example.com
+      http:
+        paths:
+          - path: /webhooks
+            pathType: Prefix
+            backend:
+              service:
+                name: webhook-server
+                port:
+                  number: 80
+```
+
+---
+
+## New: Job Grouping (Workflow Extension)
+
+Workflows can now group steps into **Jobs** — parallel execution units with shared volumes,
+matching GitHub Actions' job model.
+
+### Extended Workflow CRD
+
+```yaml
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Workflow
+spec:
+  timeout: "15m"
+
+  # NEW: Jobs field — groups steps into parallel execution units.
+  # Backward-compatible: if jobs is empty, falls back to flat steps.
+  jobs:
+    - name: build
+      env:                                      # job-level env vars
+        - name: GOOS
+          value: linux
+      steps:
+        - name: checkout
+          image: alpine/git:latest
+          command: ["git", "clone", "--depth", "1", "https://...", "/workspace"]
+        - name: compile
+          image: golang:1.23
+          command: ["go", "build", "-o", "app", "./cmd"]
+          dependsOn: [checkout]
+
+    - name: test
+      needs: [build]                            # waits for "build" job to complete
+      env:
+        - name: DB_URL
+          value: postgres://localhost/test
+      steps:
+        - name: unit
+          image: golang:1.23
+          command: ["go", "test", "./..."]
+        - name: lint
+          image: golang:1.23
+          command: ["golangci-lint", "run"]
+          # steps within a job run sequentially (as today) unless explicitly parallel
+
+    - name: deploy
+      needs: [test]                              # only after test succeeds
+      when: on_success                           # job-level conditional
+      steps:
+        - name: push-image
+          image: bitnami/kubectl:latest
+          command: ["kubectl", "set", "image", "deployment/app", "app=myapp:latest"]
+```
+
+### Parallelism Model
+
+```
+Jobs without "needs" → run IN PARALLEL
+Jobs with "needs"    → wait for ALL dependency Jobs to complete
+
+Within a job:        → steps run SEQUENTIALLY (existing step DAG model)
+
+Example:
+  build ──▶ test ──▶ deploy
+  push  ──┘            │
+                       ▼
+                  notify ──▶ archive
+```
+
+### Shared Volume Between Steps in a Job
+
+Steps in the same job share a PVC for artifact passing:
+
+```yaml
+spec:
+  jobs:
+    - name: build
+      sharedVolume:
+        pvc:
+          claimName: build-workspace   # existing PVC, or:
+        emptyDir: {}
+      steps:
+        - name: compile
+          image: golang:1.23
+          command: ["go", "build", "-o", "/workspace/app"]
+        - name: archive
+          image: alpine
+          command: ["tar", "-czf", "/workspace/app.tar.gz", "/workspace/app"]
+          dependsOn: [compile]
+```
+
+If `sharedVolume` is set, all steps in the job mount it at `/workspace`. Steps can pass artifacts
+through this volume.
+
+### Migration Path
+
+Existing Workflows (flat `spec.steps`) continue to work unchanged. The controller checks
+`spec.jobs` first — if present, uses job-level orchestration; otherwise falls back to the
+existing flat-step reconciler path.
+
+---
+
 ## Key Design Decisions
 
 | Decision | Rationale |
@@ -427,3 +649,8 @@ No finalizer logic needed.  `BackoffLimit: 0` on Jobs ensures the operator
 | `RunAsUser: 1000` at pod level | Satisfies `RunAsNonRoot` for root-default images (busybox etc). |
 | Workflow timeout via `RequeueAfter` | CR lacks cron — requeue is the standard controller-runtime pattern. |
 | Status via `MergeFrom` patch | Avoids conflicts and redundant full-object writes. |
+| **Webhook server integrated in manager (port 8080)** | Single binary, single deployment; lightweight processing; can extract later if needed |
+| **Jobs as logical step groups with shared PVC** | Each step still creates a Runner CR (minimal change); parallel job coordination via controller; shared volume for artifacts |
+| **EventTrigger as new CRD** | Declarative, Kubernetes-native; controller reconciles triggers → registers/deregisters webhook routes |
+| **Dot-path JSON selectors for parameters** | Zero new dependencies; sufficient for common GitHub webhook fields; upgrade to CEL later |
+| **Backward-compatible Workflow extension** | Existing flat `spec.steps` Workflows continue unchanged; `spec.jobs` is additive |

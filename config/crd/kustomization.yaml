@@ -4,6 +4,7 @@
 resources:
 - bases/runners.runner-operator.io_runners.yaml
 - bases/runners.runner-operator.io_workflows.yaml
+- bases/runners.runner-operator.io_eventtriggers.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

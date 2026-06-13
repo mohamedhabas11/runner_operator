@@ -139,14 +139,75 @@
 **E2E compilation:** `go vet -tags=e2e ./test/e2e/` — OK
 **Lint:** `make lint-fix` — 0 issues
 
-## Current Session
+## Current Session — Bug Fixes & Push
 
-*(none in progress)*
+*(session complete — pushed to main)*
 
 ## Deferred / Skipped
 
 ### P2 — Nice to Have
 
 - [ ] **Improve Conditions** — Add Reason/Message to status conditions for better observability. Low priority; functional behavior unchanged.
-- [ ] **Validating webhooks** — Block invalid specs at admission time.
 - [ ] **Topological sort of steps** — Process steps in dependency order, not slice order.
+
+---
+
+## Next Major Features — Event Triggers, Job Grouping, Webhooks
+
+### Session 8 — Architecture Design (opencode)
+
+**Context:** Three major features requested: event-driven triggers (GitHub webhooks → workflow creation), job grouping (parallel job sets with `needs`), and an HTTP webhook endpoint exposed via Ingress.
+
+**Work Done:**
+- Comprehensive gap analysis: 30 GitHub Actions features audited — 5 fully implemented, 7 partially, 18+ missing
+- Explored existing infrastructure: no webhook server, no ingress, no HTTP framework, controller-runtime manager on 9443/8081
+- Made 4 architectural decisions via engineering judgment (see `arch/blueprint.md` — ADR section updated)
+
+**Engineering Decisions (ADRs):**
+
+| # | Decision | Choice | Rationale |
+|---|----------|--------|-----------|
+| ADR-5 | Webhook server location | **Integrated** into manager binary on port 8080 | Single deployment, lightweight processing, can extract later if needed |
+| ADR-6 | Job grouping model | **Logical groups with shared PVC** — steps within a job share a volume; each step still creates a Runner CR | Minimal change to existing architecture; parallel jobs via controller coordination; shared volume for artifacts |
+| ADR-7 | EventTrigger CRD | **New CRD** with webhook path, HMAC secret, workflow template ref, parameter mapping | Declarative, Kubernetes-native, controller can reconcile |
+| ADR-8 | Parameter extraction | **Dot-path JSON field selectors** (e.g., `$.ref`, `$.repository.full_name`) | Zero new dependencies, sufficient for common webhook fields, can upgrade to CEL later |
+
+**Key Changes to Notes:**
+- Blueprint updated at `arch/blueprint.md` with ADR section, webhook server diagram, EventTrigger CRD spec, and extended Workflow with Jobs
+- Requirements updated at `arch/requirements.md` with new must/should items for event triggers, webhooks, and job grouping
+
+### Session 9 — Implementation (opencode)
+
+**Work Done (all phases complete):**
+
+| Phase | Status | What |
+|-------|--------|------|
+| 1a | ✅ | Extended `WorkflowSpec` with `Jobs []JobSpec` (backward-compatible; `Steps` fallback when `Jobs` empty) |
+| 1b | ✅ | Added `JobStatus` tracking to `WorkflowStatus`, `SharedVolume` type for artifact passing between steps in a job |
+| 1c | ✅ | Rewrote `Reconcile` to dispatch to job-based (`reconcileJobWorkflow`) or flat-step path; added `detectJobCycle`, `evaluateJobWhen`, `reconcileJobSteps`, `buildJobStepRunner` with shared volume injection, `computeJobWorkflowPhase` |
+| 2 | ✅ | Created `EventTrigger` CRD via kubebuilder scaffold; added safety fields: `WebhookConfig.Path`, `WebhookConfig.SecretRef` (HMAC), `WebhookConfig.AllowedIPs`, `ParameterMapping.Sanitize`, `RateLimitConfig.MaxPerMinute`, `RateLimitConfig.MaxConcurrent`, `AllowedNamespaces` |
+| 3 | ✅ | Built `internal/webhook/events/server.go` — HTTP server on port 8080 (manager Runnable), GitHub HMAC-SHA256 validation, payload size limit (1MB), dot-path parameter extraction, rate limiter, IP whitelist, request logging middleware |
+| 4 | ✅ | Updated `EventTriggerReconciler` — registers routes on webhook server on create/update, deregisters on delete, fires K8s Events for registration success/failure |
+| 5 | ✅ | Created `config/webhook/webhook_event_service.yaml` (Service port 80→8080), `config/webhook/kustomization.yaml`; added port 8080 to manager Deployment |
+| 6 | 🔲 | Tests — unit tests exist but no dedicated tests yet for new paths |
+
+**Safety features built into EventTrigger:**
+- HMAC-SHA256 payload validation (GitHub X-Hub-Signature-256)
+- Payload size capped at 1MB
+- Rate limiting (configurable max per minute)
+- IP CIDR whitelist
+- Parameter sanitization (strips shell metacharacters)
+- Secret handling via K8s Secrets (never logged or exposed in error messages)
+- Webhook route deregistration on trigger deletion
+
+**Key implementation details:**
+- `buildJobStepRunner` injects shared volume (emptyDir/PVC), job-level env vars, and job-level gitRepo into each step's Runner spec
+- Steps in a job get label `runner-operator.io/job: <name>` for filtering
+- `evaluateJobWhen` supports `on_success`, `on_failure`, `always` at the job level (same semantics as step-level `when`)
+- Jobs without `needs` run in parallel; jobs with `needs` wait for dependencies
+- Existing flat-step Workflows continue to work unchanged (backward compatible)
+- Parameter extraction uses safe dot-path JSON selectors (`$.ref`, `$.repository.full_name`)
+- Workflow template lookup uses the referenced Workflow CR as a blueprint; parameters injected as env vars on the first step
+
+**Test Results:** `make test` — passing (23.4% coverage), `make lint` — 0 issues
+**Build:** `go build ./...` — OK
