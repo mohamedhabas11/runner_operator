@@ -34,22 +34,67 @@ EOF
 kubectl get runner hello -w
 ```
 
-## Usage Examples
+## Core Concepts
 
-### Runner with git repo
+### With gitRepo — clone a repo and run a script
+
+Set `gitRepo` to clone a repository. The working directory is automatically set to `/workspace/repo` (or `/workspace/repo/<path>` if `gitRepo.path` is set). Run scripts from the checkout via `command` or `args`.
 
 ```yaml
 apiVersion: runners.runner-operator.io/v1alpha1
 kind: Runner
 metadata:
-  name: build
+  name: run-tests
 spec:
   image: golang:1.23
-  command: ["go", "test", "./..."]
+  command: ["go", "test", "-v", "./..."]
   gitRepo:
     url: https://github.com/org/repo.git
     revision: main
+    path: services/api          # optional: working dir becomes /workspace/repo/services/api
+  env:
+    - name: CGO_ENABLED
+      value: "0"
+    - name: GOOS
+      value: linux
   timeoutAfter: 30m
+```
+
+The init container (alpine/git) clones the repo into an emptyDir shared volume,
+then the main container starts with `workingDir: /workspace/repo[/path]`.
+
+### Running a script from the repo
+
+If your repo has an executable script at `scripts/deploy.sh`:
+
+```yaml
+spec:
+  image: alpine:3.19
+  command: ["/bin/sh"]
+  args: ["/workspace/repo/scripts/deploy.sh"]
+  gitRepo:
+    url: https://github.com/org/deploy-tools.git
+    revision: main
+```
+
+Since the repo is cloned by the init container before the main container starts,
+you can reference any file from the checkout in `command` or `args` using the
+`/workspace/repo/` prefix (or `/workspace/repo/<path>/` if `gitRepo.path` is set).
+
+### Environment variables from Secrets & ConfigMaps
+
+```yaml
+spec:
+  image: alpine:3.19
+  command: ["printenv"]
+  env:
+    - name: INLINE_VAR
+      value: "hello"
+  envFrom:
+    - secretRef:
+        name: api-credentials     # each key → env var
+    - configMapRef:
+        name: app-config
 ```
 
 ### Workflow with dependencies
@@ -81,7 +126,34 @@ spec:
           maxDelay: 30s
 ```
 
+### Workflow with env vars and git repo at step level
+
+```yaml
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Workflow
+metadata:
+  name: ci
+spec:
+  steps:
+    - name: lint
+      image: golang:1.23
+      env:
+        - name: GOPATH
+          value: /go
+      command: ["golangci-lint", "run"]
+    - name: test
+      image: golang:1.23
+      command: ["go", "test", "./..."]
+      dependsOn: [lint]
+      gitRepo:
+        url: https://github.com/org/repo.git
+        revision: main
+```
+
 ### Workflow with parallel job groups
+
+Job-level `env` is prepended to every step in that job; job-level `gitRepo`
+applies to any step that doesn't set its own.
 
 ```yaml
 apiVersion: runners.runner-operator.io/v1alpha1
@@ -108,6 +180,34 @@ spec:
         - name: push
           image: bitnami/kubectl
           command: ["kubectl", "set", "image", "deployment/app", "app=myapp:latest"]
+```
+
+#### Job-level env & gitRepo inheritance
+
+```yaml
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Workflow
+metadata:
+  name: ci
+spec:
+  jobs:
+    - name: build
+      env:                                       # applied to every step in this job
+        - name: GOOS
+          value: linux
+      steps:
+        - name: compile
+          image: golang:1.23
+          command: ["go", "build", "-o", "app"]
+    - name: deploy
+      needs: [build]
+      gitRepo:                                   # cloned for every step that doesn't set its own
+        url: https://github.com/org/repo.git
+        revision: main
+      steps:
+        - name: push
+          image: bitnami/kubectl
+          command: ["kubectl", "set", "image", "deployment/app", "app=myapp"]
 ```
 
 ### EventTrigger (webhook → Workflow)
