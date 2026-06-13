@@ -211,3 +211,56 @@
 
 **Test Results:** `make test` — passing (23.4% coverage), `make lint` — 0 issues
 **Build:** `go build ./...` — OK
+
+---
+
+## Session 10 — Code Review Follow-up (Latest 3 Commits)
+
+**Work Done:**
+- Reviewed commits 7de5dec (release workflow), 91602e1 (kustomization), 2484058 (README)
+
+### P1 — Important
+
+- [ ] **Release workflow: fetch-depth optimization** — Change `fetch-depth: 0` to `fetch-depth: 1` + `git fetch --tags` in `.github/workflows/release-chart.yaml:16` for performance
+- [ ] **Release workflow: clean release notes** — Add `--no-merges` to `git log` in release notes generation (lines 33-59)
+- [ ] **Release workflow: gh-pages error handling** — Add explicit check for `gh-pages` branch existence before worktree operations (lines 72-77); remove `|| true` masking
+- [ ] **README: parameterize GitHub URLs** — Replace hardcoded `mohamedhabas11/runner_operator` with variable/pattern in README.md and release workflow
+
+### P2 — Nice to Have
+
+- [ ] **README: verify ingress example file** — Confirm `config/webhook/ingress.yaml` exists or add note to create it (README.md:421-423)
+- [ ] **README: fix NetworkPolicy CIDR** — Make `10.0.0.0/8` block configurable or add note about pod CIDR assumption (README.md:520-523)
+- [ ] **README: verify CRD preserveUnknownFields** — Check `config/crd/bases/` for actual value; kubebuilder v4 defaults to `true` (README.md:534-535)
+- [ ] **README: verify Prometheus alert labels** — Confirm `controller="runner"` matches actual controller-runtime metric labels (README.md:561-563)
+- [ ] **README: note stern as optional** — Add `kubectl logs` alternative (README.md:572)
+- [ ] **README: verify CRD group/version in examples** — Cross-reference with `api/v1alpha1/*_types.go`
+- [ ] **Add CI check for README examples** — Use `kubeconform` or `kubectl apply --dry-run=client` to catch drift
+- [ ] **Add markdownlint/vale check** — For documentation consistency
+
+---
+
+## Session 11 — Cross-Namespace & Multi-Tenancy Deep Dive
+
+**Work Done:**
+- Analyzed RBAC, manager deployment, controller watching, webhook server, CRD types
+- Identified 10 gaps preventing reliable cross-namespace operation
+
+### P0 — Critical (Incorrectness)
+
+- [ ] **RunnerRef: add Namespace field** — Change `RunnerRef *corev1.LocalObjectReference` to a custom type with `Name`+`Namespace` in `api/v1alpha1/workflow_types.go:62`. Update `buildStepRunner` at `internal/controller/workflow_controller.go:359` to resolve cross-namespace. Regenerate CRD with `make manifests generate`.
+- [ ] **Enforce AllowedNamespaces** — In `internal/webhook/events/server.go:createWorkflow` (line 282), check `trigger.Spec.AllowedNamespaces` before creating workflow. If non-empty and `trigger.Namespace` not in list, reject with error. Also enforce in `EventTriggerReconciler.Reconcile`.
+- [ ] **Add namespace validation webhook** — Create `ValidatingWebhookConfiguration` for EventTrigger that validates `WorkflowTemplate.Namespace` exists and is accessible.
+
+### P1 — Important (Robustness)
+
+- [ ] **EventTrigger workflow ownership** — In `server.go:createWorkflow`, set `controllerutil.SetControllerReference(trigger, workflow, scheme)` so deleting an EventTrigger cleans up created workflows. Requires trigger and workflow in same namespace.
+- [ ] **Cross-namespace template workflow** — Decide: create workflow in template namespace (for reuse) or trigger namespace (for isolation). Document decision. If template namespace, update `server.go:299`.
+- [ ] **SharedVolume PVC cross-namespace** — Document that PVC references are namespace-scoped. For cross-namespace job grouping, use EmptyDir or CSI-driven cross-namespace volumes.
+- [ ] **Webhook server RBAC** — Ensure `ClusterRole` allows workflow creation in all target namespaces. Add explicit RBAC for `AllowedNamespaces` if needed.
+
+### P2 — Nice to Have (Operational)
+
+- [ ] **Namespace quotas** — Add `NamespaceQuota` field to WorkflowSpec or integrate with Kubernetes ResourceQuota to limit concurrent workflows per namespace.
+- [ ] **Tenant-aware metrics** — Add `namespace` label to all Prometheus metrics and Kubernetes Events for cost attribution.
+- [ ] **Network isolation** — Add namespace isolation network policies between tenant namespaces.
+- [ ] **Audit logging** — Log all cross-namespace operations with tenant identity for compliance.
