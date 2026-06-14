@@ -1,0 +1,32 @@
+# runner-operator markdownlint-cli2 configuration
+# Docs: https://github.com/DavidAnson/markdownlint-cli2
+
+# Ignore auto-generated and legacy doc directories
+ignores:
+  - "arch/"
+  - "ledger/"
+  - "AGENTS.md"
+  - "README.md"
+
+# markdownlint rules
+config:
+  # MD013 - Line length (relaxed for docs)
+  MD013:
+    line_length: 120
+    code_blocks: false
+    tables: false
+    headings: false
+
+  # MD033 - Inline HTML (needed for HTML in markdown)
+  MD033: false
+
+  # MD024 - Multiple headings with same content (relax for nested sections)
+  MD024:
+    siblings_only: true
+
+  # MD041 - First line in file should be a top-level heading
+  MD041: false
+
+  # MD046 - Code block style
+  MD046:
+    style: fenced
