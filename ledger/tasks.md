@@ -11,6 +11,7 @@
 - [ ] **Add namespace validation webhook** — Scaffold via `kubebuilder create webhook --group runners --version v1alpha1 --kind EventTrigger --programmatic-validation`. Validate: `Webhook.Path` uniqueness, `WorkflowTemplate.Name` non-empty, `AllowedNamespaces` entries valid DNS labels. **Blocked on cert-manager install** — cert-manager must be running in the cluster before scaffolding. Setup docs added to `arch/blueprint.md` §Cert-Manager Setup. Scaffold command: `kubebuilder create webhook --group runners --version v1alpha1 --kind EventTrigger --programmatic-validation`.
 
 - [x] **GitRepo secret pre-flight validation** — ✅ Implemented: `validateGitRepoSecret(ctx, runner)` checks that the Git auth Secret exists and contains all required keys (ssh-privatekey, username+password, or token) before the Job is created. Key-checking logic extracted to pure function `checkSecretHasKeys` with 5 unit tests. Condition `ReasonRunnerValidationFailed` + K8s Event on failure.
+- [x] **CSI/external-secrets compatibility** — ✅ `validateGitRepoSecret` no longer hard-errors when the Secret is not found. Instead logs a warning and proceeds, allowing secrets provided by `SecretProviderClass` (CSI), External Secrets Operator, or similar mechanisms to work without a real K8s Secret resource.
 
 #### P1 — Important
 

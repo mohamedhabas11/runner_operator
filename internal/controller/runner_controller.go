@@ -315,7 +315,10 @@ func (r *RunnerReconciler) updateStatusFromJob(ctx context.Context, runner *runn
 
 // validateGitRepoSecret checks that the Git auth Secret exists and contains
 // all required keys before a Job is created. Returns nil for no auth or public
-// repos. Returns an error with a user-facing message if validation fails.
+// repos or when the secret is provided by an external mechanism (CSI, External
+// Secrets Operator, etc.) and therefore doesn't exist as a Kubernetes Secret.
+// Returns an error with a user-facing message if validation fails for a
+// resource that does exist and is missing required keys.
 func (r *RunnerReconciler) validateGitRepoSecret(ctx context.Context, runner *runnersv1alpha1.Runner) error {
 	if runner.Spec.GitRepo == nil || runner.Spec.GitRepo.Auth == nil {
 		return nil
@@ -326,7 +329,14 @@ func (r *RunnerReconciler) validateGitRepoSecret(ctx context.Context, runner *ru
 	}
 	secret := &corev1.Secret{}
 	if err := r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: runner.Namespace}, secret); err != nil {
-		return fmt.Errorf("git auth secret %q not found: %w", secretName, err)
+		if apierrors.IsNotFound(err) {
+			// Secret may be provided by CSI SecretProviderClass, External Secrets
+			// Operator, or another mechanism. Log a warning and proceed.
+			log.FromContext(ctx).Info("Git auth secret not found as Kubernetes Secret, assuming external provider",
+				"secret", secretName, "namespace", runner.Namespace)
+			return nil
+		}
+		return fmt.Errorf("failed to check git auth secret %q: %w", secretName, err)
 	}
 	requiredKeys := gitops.RequiredSecretKeys(runner.Spec.GitRepo)
 	if err := checkSecretHasKeys(secret, secretName, requiredKeys); err != nil {
