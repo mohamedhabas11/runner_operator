@@ -225,6 +225,140 @@ func TestPayloadRoundTrip(t *testing.T) {
 	}
 }
 
+func TestExtractParamsRequired(t *testing.T) {
+	payload := map[string]any{
+		"ref": "refs/heads/main",
+	}
+
+	mappings := []runnersv1alpha1.ParameterMapping{
+		{Name: "GITHUB_REF", Source: "$.ref", Required: false},
+	}
+
+	_, err := extractParams(mappings, payload)
+	if err != nil {
+		t.Fatalf("unexpected error for non-required existing field: %v", err)
+	}
+
+	mappingsRequired := []runnersv1alpha1.ParameterMapping{
+		{Name: "GITHUB_REF", Source: "$.ref", Required: true},
+	}
+
+	_, err = extractParams(mappingsRequired, payload)
+	if err != nil {
+		t.Fatalf("unexpected error for required existing field: %v", err)
+	}
+
+	mappingsMissingRequired := []runnersv1alpha1.ParameterMapping{
+		{Name: "MISSING", Source: "$.nonexistent", Required: true},
+	}
+
+	_, err = extractParams(mappingsMissingRequired, payload)
+	if err == nil {
+		t.Fatal("expected error for missing required parameter")
+	}
+}
+
+func TestCreateWorkflowInjectsParamsIntoAllSteps(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := runnersv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+
+	trigger := runnersv1alpha1.EventTrigger{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-trigger",
+			Namespace: "test-ns",
+			UID:       "abc-123-def",
+		},
+		Spec: runnersv1alpha1.EventTriggerSpec{
+			WorkflowTemplate: runnersv1alpha1.WorkflowTemplateRef{
+				Name:      "multi-step-template",
+				Namespace: "test-ns",
+			},
+		},
+	}
+
+	template := &runnersv1alpha1.Workflow{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "multi-step-template",
+			Namespace: "test-ns",
+		},
+		Spec: runnersv1alpha1.WorkflowSpec{
+			Steps: []runnersv1alpha1.WorkflowStep{
+				{Name: "step-1", Image: "busybox", Command: []string{"echo", "hello"}},
+				{Name: "step-2", Image: "busybox", Command: []string{"echo", "world"}},
+			},
+			Jobs: []runnersv1alpha1.JobSpec{
+				{
+					Name: "job-1",
+					Steps: []runnersv1alpha1.WorkflowStep{
+						{Name: "job-step-1", Image: "busybox", Command: []string{"env"}},
+						{Name: "job-step-2", Image: "busybox", Command: []string{"env"}},
+					},
+				},
+			},
+		},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(template).
+		Build()
+
+	srv := NewServer(cl, scheme, ":0")
+
+	params := map[string]string{"GITHUB_REF": "refs/heads/main", "GITHUB_REPO": "myorg/myrepo"}
+	if err := srv.createWorkflow(t.Context(), trigger, params); err != nil {
+		t.Fatalf("createWorkflow failed: %v", err)
+	}
+
+	created := &runnersv1alpha1.WorkflowList{}
+	if err := cl.List(t.Context(), created, client.InNamespace("test-ns")); err != nil {
+		t.Fatal(err)
+	}
+
+	var wf *runnersv1alpha1.Workflow
+	for i := range created.Items {
+		if created.Items[i].GenerateName != "" {
+			wf = &created.Items[i]
+			break
+		}
+	}
+	if wf == nil {
+		t.Fatal("expected a generated workflow, found none")
+	}
+
+	// Verify all Steps have the injected params
+	for i := range wf.Spec.Steps {
+		envMap := make(map[string]string)
+		for _, e := range wf.Spec.Steps[i].Env {
+			envMap[e.Name] = e.Value
+		}
+		if envMap["GITHUB_REF"] != "refs/heads/main" {
+			t.Errorf("Steps[%d] missing GITHUB_REF env var", i)
+		}
+		if envMap["GITHUB_REPO"] != "myorg/myrepo" {
+			t.Errorf("Steps[%d] missing GITHUB_REPO env var", i)
+		}
+	}
+
+	// Verify all Job Steps have the injected params
+	for j := range wf.Spec.Jobs {
+		for i := range wf.Spec.Jobs[j].Steps {
+			envMap := make(map[string]string)
+			for _, e := range wf.Spec.Jobs[j].Steps[i].Env {
+				envMap[e.Name] = e.Value
+			}
+			if envMap["GITHUB_REF"] != "refs/heads/main" {
+				t.Errorf("Jobs[%d].Steps[%d] missing GITHUB_REF env var", j, i)
+			}
+			if envMap["GITHUB_REPO"] != "myorg/myrepo" {
+				t.Errorf("Jobs[%d].Steps[%d] missing GITHUB_REPO env var", j, i)
+			}
+		}
+	}
+}
+
 func TestCreateWorkflowSetsOwnerReference(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := runnersv1alpha1.AddToScheme(scheme); err != nil {

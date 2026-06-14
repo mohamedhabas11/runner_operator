@@ -396,6 +396,18 @@ All open tasks are tracked in `ledger/review.md` organized by time horizon (Imme
 - [ ] **SharedVolume PVC cross-namespace** — Document that PVC references are namespace-scoped. For cross-namespace job grouping, use EmptyDir or CSI-driven cross-namespace volumes.
 - [x] **Webhook server RBAC** — Added `// +kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;list;watch` to EventTrigger controller. Generated ClusterRole updated.
 
+## Session 17 — Close Remaining Review Findings
+
+**Goal:** Complete I-3 (Helm README), ST-3 (path collision test), ST-4 (secret watch test), ST-5 (parameter injection test), regenerate dist.
+
+**Work Done:**
+- **I-3:** README updated to reflect `--leader-elect` binary default changed to `true` (line 214). Helm chart already had `args: ["--leader-elect"]`.
+- **ST-3:** Added path collision integration test for EventTrigger — verifies `PathCollision` condition set on duplicate path, first trigger unaffected. 2 new specs (17→18 total). Coverage 49.4% → 50.4%.
+- **ST-4:** Added 6 unit tests for `mapSecretToTriggers` — matching secret, unrelated secret, non-Secret object, namespace mismatch, trigger without webhook, empty namespace in SecretRef. Coverage 50.4% → 52.3%.
+- **ST-5:** Added `TestExtractParamsRequired` (3 subtests: non-required → ok, required existing → ok, required missing → error). Added `TestCreateWorkflowInjectsParamsIntoAllSteps` (multi-step + multi-job: verifies all steps get injected params). Webhook coverage 31.7% → 33.7%.
+- Regenerated `dist/install.yaml` via `make build-installer`.
+- Updated `ledger/review.md` marking 3 more items as [x].
+
 ### P2 — Nice to Have (Operational)
 
 - [ ] **Namespace quotas** — Add `NamespaceQuota` field to WorkflowSpec or integrate with Kubernetes ResourceQuota to limit concurrent workflows per namespace.

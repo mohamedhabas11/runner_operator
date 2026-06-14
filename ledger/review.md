@@ -42,8 +42,8 @@ Change `cmd/main.go:71` default from `false` to `true`. Users who want single-re
 **File:** `cmd/main.go`
 
 - [x] Change `flag.BoolVar(&enableLeaderElection, "leader-elect", false, ...)` to `true`
-- [ ] Update Helm chart values to match default
-- [ ] Document in README upgrade note
+- [x] Update Helm chart values to match default
+- [x] Document in README upgrade note
 
 ---
 
@@ -85,7 +85,7 @@ Current integration tests are smoke-only (create CR, call Reconcile once, assert
 
 - [x] Runner: verify Job created with correct spec, phase transitions, spec drift replaces Job, validation failure persists condition
 - [x] Workflow: 3-step DAG → all Runners complete → workflow Succeeded, `dependsOn` ordering verified, `when=on_failure` skip verified
-- [ ] EventTrigger: registration successful, path collision sets condition
+- [x] EventTrigger: registration successful, path collision sets condition
 - [x] Refactor test helpers for shared setup/teardown
 
 ### ST-4: Add Secret watch to EventTrigger controller
@@ -97,7 +97,7 @@ Add `Watches()` on Secrets with an event mapper that maps secret changes to the 
 
 - [x] Implement `mapSecretToTriggers` event mapper
 - [x] Add `Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(mapper))` in `SetupWithManager`
-- [ ] Unit test: secret update → trigger reconcile queued
+- [x] Unit test: secret update → trigger reconcile queued
 - [ ] E2E test: rotate HMAC secret → webhook still accepts new signature
 
 ### ST-5: Inject webhook parameters to all steps
@@ -109,7 +109,7 @@ Instead of injecting only into `Steps[0].Env` or `Jobs[0].Steps[0].Env`, inject 
 
 - [x] Inject parameters into all steps (not just first)
 - [x] Update `server.go` parameter injection logic
-- [ ] Update webhook tests
+- [x] Update webhook tests
 - [ ] E2E test: 3-step workflow → parameters available in step 2 and 3
 
 ---

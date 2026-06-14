@@ -211,7 +211,7 @@ make deploy IMG=example.com/runner-operator:v0.0.1
 | `manager.image.tag` | `""` | Defaults to Chart.appVersion |
 | `manager.image.pullPolicy` | `IfNotPresent` | Image pull policy |
 | `manager.imagePullSecrets` | `[]` | Auth for private registries |
-| `manager.args` | `["--leader-elect"]` | Extra CLI args (overrides binary default `false` for HA) |
+| `manager.args` | `["--leader-elect"]` | Extra CLI args (binary default is now `true`; set `--leader-elect=false` for single-replica without HA) |
 | `manager.resources.limits.cpu` | `500m` | CPU limit |
 | `manager.resources.limits.memory` | `128Mi` | Memory limit |
 | `manager.resources.requests.cpu` | `10m` | CPU request |
