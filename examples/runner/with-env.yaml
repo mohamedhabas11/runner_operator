@@ -1,0 +1,16 @@
+# Injects environment variables from inline values, Secrets, and ConfigMaps.
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Runner
+metadata:
+  name: env-runner
+spec:
+  image: alpine:3.19
+  command: ["env"]
+  env:
+    - name: INLINE_VAR
+      value: "hello"
+  envFrom:
+    - secretRef:
+        name: api-credentials
+    - configMapRef:
+        name: app-config

@@ -1,0 +1,31 @@
+# Multi-step CI pipeline with dependency gating and retry.
+# Steps without dependsOn (e.g., lint) start immediately in parallel.
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Workflow
+metadata:
+  name: ci-pipeline
+spec:
+  timeout: "15m"
+  steps:
+    - name: lint
+      image: golang:1.23
+      command: ["golangci-lint", "run", "./..."]
+    - name: test
+      image: golang:1.23
+      command: ["go", "test", "./..."]
+      dependsOn: [lint]
+      when: on_success
+    - name: build
+      image: golang:1.23
+      command: ["go", "build", "-o", "/dev/null", "./..."]
+      dependsOn: [test]
+    - name: deploy
+      image: bitnami/kubectl:1.30
+      command: ["kubectl", "apply", "-f", "deploy.yaml"]
+      dependsOn: [build]
+      when: on_success
+      retry:
+        maxRetries: 3
+        backoff:
+          initialDelay: 5s
+          maxDelay: 30s

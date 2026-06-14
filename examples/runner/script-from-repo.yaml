@@ -1,0 +1,12 @@
+# Runs a script file from the cloned repository rather than a binary command.
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Runner
+metadata:
+  name: script-runner
+spec:
+  image: alpine:3.19
+  command: ["/bin/sh"]
+  args: ["/workspace/repo/scripts/deploy.sh"]
+  gitRepo:
+    url: https://github.com/org/deploy-tools.git
+    revision: main

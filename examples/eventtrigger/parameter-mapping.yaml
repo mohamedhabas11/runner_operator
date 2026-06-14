@@ -1,0 +1,24 @@
+# Extracts fields from the webhook JSON payload and injects them as
+# environment variables into every step of the created Workflow.
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: EventTrigger
+metadata:
+  name: gitlab-merge-request
+spec:
+  webhook:
+    path: /webhooks/gitlab-mr
+  workflowTemplate:
+    name: mr-pipeline
+    namespace: default
+  parameters:
+    - name: MR_ID
+      source: $.object_attributes.iid
+    - name: MR_SOURCE_BRANCH
+      source: $.object_attributes.source_branch
+    - name: MR_TARGET_BRANCH
+      source: $.object_attributes.target_branch
+    - name: MR_AUTHOR
+      source: $.user.username
+  rateLimit:
+    maxPerMinute: 20
+    maxConcurrent: 5

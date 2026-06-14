@@ -1,0 +1,8 @@
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Runner
+metadata:
+  name: hello
+spec:
+  image: alpine:3.19
+  command: ["echo"]
+  args: ["hello world"]

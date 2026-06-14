@@ -1,0 +1,8 @@
+# Limits concurrent Workflows in a namespace via annotation.
+# Annotate any Namespace object to set the limit.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-a
+  annotations:
+    runner-operator.io/max-concurrent-workflows: "5"

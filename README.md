@@ -19,6 +19,7 @@ Webhook-triggered pipelines, secret management, and git integration built in.
 - [Monitoring](#monitoring)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
+- [Examples](examples/)
 - [Architecture Blueprint](arch/blueprint.md)
 
 ---
@@ -26,24 +27,32 @@ Webhook-triggered pipelines, secret management, and git integration built in.
 ## Architecture
 
 ```
-                     Kubernetes Cluster
- ┌──────────────────────────────────────────────────────────────────┐
- │  ┌──────────────┐  ┌────────────────┐  ┌──────────────────────┐  │
- │  │ Runner       │  │ Workflow       │  │ EventTrigger         │  │
- │  │ Controller   │  │ Controller     │  │ Controller           │  │
- │  └──────┬───────┘  └───────┬────────┘  └─────────┬────────────┘  │
- │         │                  │                      │               │
- │         │  .Owns()         │  .Owns()             │  watches      │
- │         ▼                  ▼                      ▼               │
- │  ┌──────────────────────────────────────────────────────────────┐ │
- │  │  Webhook Server (port 8080) — event-triggered pipelines      │ │
- │  │  /webhooks/github-push → HMAC → validate → create Workflow   │ │
- │  └──────────────────────────────────────────────────────────────┘ │
- │                                                                    │
- │  Runner CR ──→ batch/v1.Job ──→ Pod (init: git-clone, main: img)  │
- │  Workflow CR ──→ Runner CRs ──→ batch/v1.Job ──→ Pods            │
- └──────────────────────────────────────────────────────────────────┘
+                     ┌──────────────────────────────────────────────────┐
+                     │            Manager (single binary)               │
+                     │                                                  │
+                     │  ┌──────────┐  ┌──────────┐  ┌──────────────┐   │
+                     │  │ Runner   │  │ Workflow │  │ EventTrigger  │   │
+                     │  │ Ctrl     │  │ Ctrl     │  │ Ctrl          │   │
+                     │  └───┬──────┘  └───┬──────┘  └───────┬───────┘   │
+                     │      │              │                  │           │
+                     │      │  .Owns()     │  .Owns()         │ watches   │
+                     │      ▼              ▼                  ▼           │
+                     │  ┌──────────────────────────────────────────┐     │
+                     │  │  Webhook Server (port 8080)               │     │
+                     │  │  /webhooks/* → HMAC → validate → create   │     │
+                     │  └──────────────────────────────────────────┘     │
+                     └──────────────────────────────────────────────────┘
+                                   │
+          ┌────────────────────────┼────────────────────────────┐
+          ▼                        ▼                            ▼
+  ┌───────────────┐       ┌───────────────┐           ┌────────────────┐
+  │  batch/v1.Job │       │  Runner CR    │           │  Workflow CR   │
+  │  ──→ Pod      │       │  spec.image   │           │  spec.steps[]  │
+  │               │       │  spec.gitRepo │           │  spec.jobs[]   │
+  └───────────────┘       └───────────────┘           └────────────────┘
 ```
+
+**Ownership chain:** `Workflow ──owns──▶ Runner ──owns──▶ Job ──owns──▶ Pod`
 
 See [`arch/blueprint.md`](arch/blueprint.md) for reconciliation flow charts,
 pod layouts, state machines, and design decisions.
@@ -115,7 +124,6 @@ pod layouts, state machines, and design decisions.
 | `gitRepo` | `GitRepo` | Applied to every step that doesn't set its own |
 
 **Status phases:** `Pending` → `Running` → `Succeeded` / `Failed` / `Unknown`
-
 **Step phases:** `Pending` `Running` `Succeeded` `Failed` `Skipped` `Waiting`
 
 ### EventTrigger — webhook → Workflow
@@ -159,8 +167,6 @@ helm upgrade runner-operator runner-operator/runner-operator
 ```
 
 ### Quick test — Kustomize bundle
-
-No Helm, no Tiller — just kubectl:
 
 ```bash
 kubectl apply -f https://raw.githubusercontent.com/mohamedhabas11/runner_operator/main/dist/install.yaml
@@ -241,8 +247,8 @@ make deploy IMG=example.com/runner-operator:v0.0.1
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `metrics.enable` | `true` | Expose /metrics endpoint |
-| `metrics.port` | `8443` | Metrics server port |
-| `metrics.secure` | `true` | HTTPS with certs/auth (requires cert-manager or manual TLS) |
+| `metrics.port` | `8080` | Metrics server port |
+| `metrics.secure` | `false` | HTTPS with certs/auth (requires cert-manager or manual TLS) |
 
 ### Cert-Manager
 
@@ -260,7 +266,25 @@ make deploy IMG=example.com/runner-operator:v0.0.1
 
 ## Usage Patterns
 
-### 1. Simplest runner — run a command
+See [`examples/`](examples/) for complete, ready-to-apply YAML files.
+
+| Pattern | File | Description |
+|---------|------|-------------|
+| Simplest runner | [`examples/runner/simple.yaml`](examples/runner/simple.yaml) | Run a command in any OCI image |
+| Git clone + test | [`examples/runner/with-git.yaml`](examples/runner/with-git.yaml) | Clone repo, run go test |
+| Script from repo | [`examples/runner/script-from-repo.yaml`](examples/runner/script-from-repo.yaml) | Run a deploy script from checkout |
+| Env injection | [`examples/runner/with-env.yaml`](examples/runner/with-env.yaml) | Inline, Secret, and ConfigMap env |
+| Private repo (SSH) | [`examples/runner/private-git.yaml`](examples/runner/private-git.yaml) | SSH key auth for git clone |
+| CI pipeline (DAG) | [`examples/workflow/simple-dag.yaml`](examples/workflow/simple-dag.yaml) | Lint → test → build → deploy |
+| Parallel job groups | [`examples/workflow/parallel-jobs.yaml`](examples/workflow/parallel-jobs.yaml) | Shared volumes, inherited env |
+| Step timeout | [`examples/workflow/with-timeout.yaml`](examples/workflow/with-timeout.yaml) | Per-step and workflow-level timeout |
+| Retry with backoff | [`examples/workflow/retry.yaml`](examples/workflow/retry.yaml) | Exponential backoff on failure |
+| GitHub push trigger | [`examples/eventtrigger/github-push.yaml`](examples/eventtrigger/github-push.yaml) | Webhook → workflow with HMAC |
+| Parameter mapping | [`examples/eventtrigger/parameter-mapping.yaml`](examples/eventtrigger/parameter-mapping.yaml) | Extract JSON fields to env vars |
+| Cross-namespace ref | [`examples/advanced/cross-namespace-ref.yaml`](examples/advanced/cross-namespace-ref.yaml) | Runner template in another ns |
+| Namespace quota | [`examples/advanced/namespace-quota.yaml`](examples/advanced/namespace-quota.yaml) | Limit concurrent workflows per ns |
+
+The simplest runner:
 
 ```yaml
 apiVersion: runners.runner-operator.io/v1alpha1
@@ -273,192 +297,13 @@ spec:
   args: ["hello world"]
 ```
 
-### 2. Clone a repo and run a test suite
-
-The init container clones to `/workspace/repo`, then the main container's
-working directory is `/workspace/repo[/path]`.
-
-```yaml
-apiVersion: runners.runner-operator.io/v1alpha1
-kind: Runner
-metadata:
-  name: test
-spec:
-  image: golang:1.23
-  command: ["go", "test", "-v", "./..."]
-  gitRepo:
-    url: https://github.com/org/repo.git
-    revision: main
-    path: services/api          # workingDir → /workspace/repo/services/api
-  env:
-    - name: CGO_ENABLED
-      value: "0"
-  timeoutAfter: 30m
-```
-
-### 3. Run a script from the cloned repo
-
-```yaml
-spec:
-  image: alpine:3.19
-  command: ["/bin/sh"]
-  args: ["/workspace/repo/scripts/deploy.sh"]
-  gitRepo:
-    url: https://github.com/org/deploy-tools.git
-    revision: main
-```
-
-### 4. Environment from Secrets & ConfigMaps
-
-```yaml
-spec:
-  image: alpine:3.19
-  env:
-    - name: INLINE_VAR
-      value: "hello"
-  envFrom:
-    - secretRef:
-        name: api-credentials
-    - configMapRef:
-        name: app-config
-```
-
-### 5. Private repo with SSH key
-
-```yaml
-spec:
-  image: alpine:3.19
-  command: ["ls"]
-  gitRepo:
-    url: git@github.com:org/private.git
-    revision: main
-    auth:
-      secretRef:
-        name: git-ssh-key
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: git-ssh-key
-data:
-  ssh-privatekey: <base64-encoded-private-key>
-```
-
-### 6. Workflow with dependency gating
-
-```yaml
-apiVersion: runners.runner-operator.io/v1alpha1
-kind: Workflow
-metadata:
-  name: ci-pipeline
-spec:
-  timeout: "15m"
-  steps:
-    - name: lint
-      image: golang:1.23
-      command: ["golangci-lint", "run", "./..."]
-    - name: test
-      image: golang:1.23
-      command: ["go", "test", "./..."]
-      dependsOn: [lint]
-      when: on_success
-    - name: deploy
-      image: bitnami/kubectl
-      command: ["kubectl", "apply", "-f", "deploy.yaml"]
-      dependsOn: [test]
-      retry:
-        maxRetries: 3
-        backoff:
-          initialDelay: 5s
-          maxDelay: 30s
-```
-
-### 7. Workflow with parallel job groups
-
-Jobs without `needs` run in parallel. Steps within a job run sequentially.
-Env and gitRepo at the job level are inherited by all steps.
-
-```yaml
-apiVersion: runners.runner-operator.io/v1alpha1
-kind: Workflow
-metadata:
-  name: ci
-spec:
-  jobs:
-    - name: build
-      env:
-        - name: GOOS
-          value: linux
-      sharedVolume:
-        emptyDir: {}
-      steps:
-        - name: compile
-          image: golang:1.23
-          command: ["go", "build", "-o", "/workspace/app"]
-
-    - name: test
-      needs: [build]
-      gitRepo:
-        url: https://github.com/org/repo.git
-      steps:
-        - name: unit
-          image: golang:1.23
-          command: ["go", "test", "./..."]
-
-    - name: deploy
-      needs: [test]
-      when: on_success
-      steps:
-        - name: push
-          image: bitnami/kubectl
-          command: ["kubectl", "set", "image", "deployment/app", "app=myapp"]
-```
-
-### 8. EventTrigger — webhook-triggered pipeline
-
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: github-webhook-secret
-data:
-  hmac-secret: <base64-encoded-shared-secret>
----
-apiVersion: runners.runner-operator.io/v1alpha1
-kind: EventTrigger
-metadata:
-  name: github-push
-spec:
-  webhook:
-    path: /webhooks/github-push
-    secretRef:
-      name: github-webhook-secret
-    allowedIPs:
-      - 192.30.252.0/22    # GitHub webhook IPs
-      - 140.82.112.0/20
-  workflowTemplate:
-    name: ci-workflow
-    namespace: default
-  parameters:
-    - name: GITHUB_REF
-      source: $.ref
-      sanitize: true
-    - name: GITHUB_SHA
-      source: $.after
-    - name: GITHUB_REPO
-      source: $.repository.full_name
-  rateLimit:
-    maxPerMinute: 10
-    maxConcurrent: 3
-```
-
 ---
 
 ## Webhook Events
 
 The operator runs an internal HTTP server on port **8080** alongside the
-controllers in the same process. Routes are registered dynamically via
-EventTrigger CRs — no deployment restart or config reload needed.
+controllers in the same process. Routes register dynamically via EventTrigger
+CRs — no deployment restart or config reload needed.
 
 ```
 External ──▶ Ingress ──▶ Service (port 80)
@@ -473,7 +318,7 @@ External ──▶ Ingress ──▶ Service (port 80)
 ```
 
 - TLS terminates at Ingress (no TLS in-process)
-- HTTPS endpoints: GitHub, GitLab, Bitbucket, or any webhook source
+- Supports GitHub, GitLab, Bitbucket, or any webhook source
 - 202 Accepted on success, 401 on HMAC mismatch, 400 on bad payload
 
 Deploy the ingress (customise hostname):
@@ -548,7 +393,7 @@ helm upgrade runner-operator runner-operator/runner-operator \
   --set manager.resources.requests.memory=128Mi
 ```
 
-Only the leader reconciles; standby replicates are hot standbys.
+Only the leader reconciles; standby replicas are hot standbys.
 
 ### Resource Sizing
 
@@ -580,30 +425,13 @@ The chart applies these defaults (Kubernetes Pod Security Standards
 ### Namespace Isolation
 
 Runner pods run in the same namespace as their Runner CR. Use
-Kubernetes NetworkPolicies to restrict egress.
+Kubernetes NetworkPolicies to restrict egress. See
+[`examples/advanced/network-policy.yaml`](examples/advanced/network-policy.yaml)
+for a working example.
 
-> **Pod CIDR note:** The `10.0.0.0/8` block below assumes your cluster
+> **Pod CIDR note:** The `10.0.0.0/8` block in the example assumes your cluster
 > Pod/Service CIDR uses RFC 1918 space. Adjust the `except` list to
 > match your cluster's actual CIDR ranges (`kubectl get nodes -o jsonpath='{.spec.podCIDR}'`).
-
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: runner-egress
-spec:
-  podSelector: {}
-  policyTypes:
-    - Egress
-  egress:
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-            except:
-              - 10.0.0.0/8    # adjust to your cluster's CIDR
-              - 172.16.0.0/12
-              - 192.168.0.0/16
-```
 
 ### Upgrading
 
@@ -625,6 +453,19 @@ need backward compatibility with old fields, preserve them via
 ## Monitoring
 
 ### Metrics (Prometheus)
+
+Custom metrics:
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `runner_job_completed_total` | Counter | namespace, phase | Completed runner jobs |
+| `runner_duration_seconds` | Histogram | namespace | Runner execution duration |
+| `runner_active_count` | Gauge | namespace, phase | Currently active runners (Pending/Running) |
+| `workflow_phase_transitions_total` | Counter | namespace, phase | Workflow phase changes |
+| `workflow_duration_seconds` | Histogram | namespace | Workflow execution duration |
+| `step_retries_total` | Counter | namespace | Step retry count |
+
+Built-in controller-runtime metrics:
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
@@ -793,6 +634,7 @@ Rationale:
 
 The webhook port is configurable via `--webhook-event-addr` (default `:8080`).
 Override it when running the manager:
+
 ```bash
 export IMG=your-registry/runner-operator:tag
 make run ARGS="--webhook-event-addr=:9090"

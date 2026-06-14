@@ -1,0 +1,20 @@
+# Demonstrates per-step timeout and workflow-level timeout enforcement.
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Workflow
+metadata:
+  name: timeboxed
+spec:
+  timeout: "10m"
+  steps:
+    - name: quick-check
+      image: alpine:3.19
+      command: ["sleep", "2"]
+    - name: slow-job
+      image: alpine:3.19
+      command: ["sh", "-c", "while true; do echo working; sleep 5; done"]
+      timeout: "30s"
+      dependsOn: [quick-check]
+    - name: never-reached
+      image: alpine:3.19
+      command: ["echo", "done"]
+      dependsOn: [slow-job]

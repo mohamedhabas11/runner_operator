@@ -1,0 +1,22 @@
+# Clones a private repository using SSH key authentication.
+# Create the referenced Secret before applying this Runner.
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Runner
+metadata:
+  name: private-repo
+spec:
+  image: alpine:3.19
+  command: ["ls", "-la", "/workspace/repo"]
+  gitRepo:
+    url: git@github.com:org/private.git
+    revision: main
+    auth:
+      secretRef:
+        name: git-ssh-key
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: git-ssh-key
+data:
+  ssh-privatekey: <base64-encoded-private-key>

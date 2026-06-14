@@ -1,0 +1,18 @@
+# The init container clones to /workspace/repo, then the main container's
+# working directory is /workspace/repo[/path]. Useful for running tests,
+# linters, or scripts from a repository checkout.
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Runner
+metadata:
+  name: test
+spec:
+  image: golang:1.23
+  command: ["go", "test", "-v", "./..."]
+  gitRepo:
+    url: https://github.com/org/repo.git
+    revision: main
+    path: services/api
+  env:
+    - name: CGO_ENABLED
+      value: "0"
+  timeoutAfter: 30m

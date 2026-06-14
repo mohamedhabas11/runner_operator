@@ -1,0 +1,46 @@
+# Workflow with parallel job groups. Jobs without needs run in parallel.
+# Steps within a job run sequentially. Env and gitRepo at job level are
+# inherited by all child steps. Shared volumes persist across steps in a job.
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Workflow
+metadata:
+  name: ci
+spec:
+  timeout: "30m"
+  jobs:
+    - name: lint
+      steps:
+        - name: golangci
+          image: golangci/golangci-lint:v1.60
+          command: ["golangci-lint", "run", "./..."]
+        - name: hadolint
+          image: hadolint/hadolint:latest
+          command: ["hadolint", "Dockerfile"]
+    - name: build
+      needs: [lint]
+      env:
+        - name: GOOS
+          value: linux
+        - name: CGO_ENABLED
+          value: "0"
+      sharedVolume:
+        emptyDir: {}
+      steps:
+        - name: compile
+          image: golang:1.23
+          command: ["go", "build", "-o", "/workspace/app", "."]
+    - name: e2e
+      needs: [build]
+      gitRepo:
+        url: https://github.com/org/repo.git
+      steps:
+        - name: test
+          image: golang:1.23
+          command: ["go", "test", "./e2e/..."]
+    - name: deploy
+      needs: [e2e]
+      when: on_success
+      steps:
+        - name: push
+          image: bitnami/kubectl:1.30
+          command: ["kubectl", "set", "image", "deployment/app", "app=myapp:latest"]

@@ -1,0 +1,16 @@
+# Step retry with configurable exponential backoff.
+# MaxRetries: 0 disables retry (default).
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Workflow
+metadata:
+  name: flaky-deploy
+spec:
+  steps:
+    - name: deploy
+      image: bitnami/kubectl:1.30
+      command: ["kubectl", "apply", "-f", "deploy.yaml"]
+      retry:
+        maxRetries: 5
+        backoff:
+          initialDelay: 2s
+          maxDelay: 60s

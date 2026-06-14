@@ -1,0 +1,17 @@
+# Workflow step referencing a Runner template in a different namespace.
+# runnerRef.namespace defaults to the workflow's namespace when omitted.
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Workflow
+metadata:
+  name: cross-ns
+  namespace: my-team
+spec:
+  steps:
+    - name: run-shared-task
+      runnerRef:
+        name: shared-terraform-plan
+        namespace: platform-tools
+    - name: follow-up
+      image: alpine:3.19
+      command: ["echo", "done"]
+      dependsOn: [run-shared-task]

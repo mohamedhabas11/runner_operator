@@ -1,0 +1,37 @@
+# GitHub push webhook → creates a Workflow.
+# HMAC-SHA256 validates payload authenticity via a shared secret.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-webhook-secret
+data:
+  hmac-secret: <base64-encoded-shared-secret>
+---
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: EventTrigger
+metadata:
+  name: github-push
+spec:
+  webhook:
+    path: /webhooks/github-push
+    secretRef:
+      name: github-webhook-secret
+    allowedIPs:
+      - 192.30.252.0/22
+      - 140.82.112.0/20
+  workflowTemplate:
+    name: ci-pipeline
+    namespace: default
+  parameters:
+    - name: GITHUB_REF
+      source: $.ref
+      sanitize: true
+    - name: GITHUB_SHA
+      source: $.after
+    - name: GITHUB_REPO
+      source: $.repository.full_name
+  rateLimit:
+    maxPerMinute: 10
+    maxConcurrent: 3
+  allowedNamespaces:
+    - default
