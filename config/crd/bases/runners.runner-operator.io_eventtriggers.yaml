@@ -75,6 +75,7 @@ spec:
                     name:
                       description: Name of the environment variable to set on the
                         created workflow.
+                      minLength: 1
                       type: string
                     required:
                       description: |-
@@ -91,6 +92,7 @@ spec:
                     source:
                       description: Source is a dot-path into the webhook JSON payload
                         (e.g. "$.ref").
+                      minLength: 1
                       type: string
                   required:
                   - name
@@ -128,6 +130,8 @@ spec:
                     description: |-
                       Path is the HTTP path for this webhook (e.g. "/webhooks/github-push").
                       Must be unique across all EventTriggers in the cluster.
+                    minLength: 1
+                    pattern: ^/
                     type: string
                   secretRef:
                     description: |-
@@ -153,6 +157,7 @@ spec:
                 properties:
                   name:
                     description: Name of the Workflow template CR to instantiate.
+                    minLength: 1
                     type: string
                   namespace:
                     description: Namespace of the Workflow template. Defaults to the

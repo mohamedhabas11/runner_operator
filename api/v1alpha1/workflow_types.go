@@ -69,6 +69,7 @@ type BackoffConfig struct {
 type WorkflowStep struct {
 	// Name of the step; must be unique within the workflow.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 
 	// RunnerRef references a Runner resource to use as a template.
@@ -103,6 +104,7 @@ type WorkflowStep struct {
 	// When is a condition expression that controls whether this step runs.
 	// Evaluated after all dependencies complete. Accepted values: "on_success" (default), "on_failure", "always".
 	// +optional
+	// +kubebuilder:validation:Enum=on_success;on_failure;always
 	When string `json:"when,omitempty"`
 
 	// Timeout for this step.
@@ -149,6 +151,7 @@ type SharedVolume struct {
 type JobSpec struct {
 	// Name of the job; must be unique within the workflow.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 
 	// Needs lists job names that must complete before this job starts.
@@ -158,6 +161,7 @@ type JobSpec struct {
 	// When controls whether this job runs based on its dependency results.
 	// Accepted values: "on_success" (default), "on_failure", "always".
 	// +optional
+	// +kubebuilder:validation:Enum=on_success;on_failure;always
 	When string `json:"when,omitempty"`
 
 	// Env defines environment variables for all steps in this job.
@@ -208,6 +212,7 @@ type JobStatus struct {
 	Name string `json:"name"`
 
 	// Phase of the job execution.
+	// +kubebuilder:validation:Enum=Pending;Running;Succeeded;Failed;Skipped;Waiting
 	Phase JobPhase `json:"phase"`
 
 	// StartedAt is when the job started.
@@ -225,6 +230,7 @@ type StepStatus struct {
 	Name string `json:"name"`
 
 	// Phase of the step execution.
+	// +kubebuilder:validation:Enum=Pending;Running;Succeeded;Failed;Skipped;Waiting
 	Phase StepPhase `json:"phase"`
 
 	// RetryCount is how many times the step has been retried.
@@ -254,6 +260,7 @@ type WorkflowStatus struct {
 
 	// Phase is the current lifecycle phase of the workflow.
 	// +optional
+	// +kubebuilder:validation:Enum=Pending;Running;Succeeded;Failed;Unknown
 	Phase WorkflowPhase `json:"phase,omitempty"`
 
 	// JobStatuses tracks the status of each workflow job.

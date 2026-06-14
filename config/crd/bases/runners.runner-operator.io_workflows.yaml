@@ -268,12 +268,14 @@ spec:
                         url:
                           description: URL of the Git repository to clone (HTTPS or
                             SSH).
+                          minLength: 1
                           type: string
                       required:
                       - url
                       type: object
                     name:
                       description: Name of the job; must be unique within the workflow.
+                      minLength: 1
                       type: string
                     needs:
                       description: Needs lists job names that must complete before
@@ -570,6 +572,7 @@ spec:
                               url:
                                 description: URL of the Git repository to clone (HTTPS
                                   or SSH).
+                                minLength: 1
                                 type: string
                             required:
                             - url
@@ -581,6 +584,7 @@ spec:
                           name:
                             description: Name of the step; must be unique within the
                               workflow.
+                            minLength: 1
                             type: string
                           retry:
                             description: Retry configures retry behaviour for this
@@ -632,6 +636,10 @@ spec:
                             description: |-
                               When is a condition expression that controls whether this step runs.
                               Evaluated after all dependencies complete. Accepted values: "on_success" (default), "on_failure", "always".
+                            enum:
+                            - on_success
+                            - on_failure
+                            - always
                             type: string
                         required:
                         - name
@@ -644,6 +652,10 @@ spec:
                       description: |-
                         When controls whether this job runs based on its dependency results.
                         Accepted values: "on_success" (default), "on_failure", "always".
+                      enum:
+                      - on_success
+                      - on_failure
+                      - always
                       type: string
                   required:
                   - name
@@ -892,6 +904,7 @@ spec:
                         url:
                           description: URL of the Git repository to clone (HTTPS or
                             SSH).
+                          minLength: 1
                           type: string
                       required:
                       - url
@@ -902,6 +915,7 @@ spec:
                       type: string
                     name:
                       description: Name of the step; must be unique within the workflow.
+                      minLength: 1
                       type: string
                     retry:
                       description: Retry configures retry behaviour for this step.
@@ -950,6 +964,10 @@ spec:
                       description: |-
                         When is a condition expression that controls whether this step runs.
                         Evaluated after all dependencies complete. Accepted values: "on_success" (default), "on_failure", "always".
+                      enum:
+                      - on_success
+                      - on_failure
+                      - always
                       type: string
                   required:
                   - name
@@ -1046,6 +1064,13 @@ spec:
                       type: string
                     phase:
                       description: Phase of the job execution.
+                      enum:
+                      - Pending
+                      - Running
+                      - Succeeded
+                      - Failed
+                      - Skipped
+                      - Waiting
                       type: string
                     startedAt:
                       description: StartedAt is when the job started.
@@ -1063,6 +1088,12 @@ spec:
                 type: integer
               phase:
                 description: Phase is the current lifecycle phase of the workflow.
+                enum:
+                - Pending
+                - Running
+                - Succeeded
+                - Failed
+                - Unknown
                 type: string
               startTime:
                 description: StartTime is when the workflow started.
@@ -1086,6 +1117,13 @@ spec:
                       type: string
                     phase:
                       description: Phase of the step execution.
+                      enum:
+                      - Pending
+                      - Running
+                      - Succeeded
+                      - Failed
+                      - Skipped
+                      - Waiting
                       type: string
                     retryCount:
                       description: RetryCount is how many times the step has been

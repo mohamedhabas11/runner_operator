@@ -46,6 +46,7 @@ type GitAuth struct {
 type GitRepo struct {
 	// URL of the Git repository to clone (HTTPS or SSH).
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	URL string `json:"url"`
 
 	// Revision is the branch, tag, or commit SHA to checkout.
@@ -71,6 +72,7 @@ type GitRepo struct {
 type RunnerSpec struct {
 	// Image is the Docker image to run.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	Image string `json:"image"`
 
 	// Env defines environment variables for the runner container.
@@ -124,6 +126,7 @@ type RunnerStatus struct {
 
 	// Phase is the current lifecycle phase.
 	// +optional
+	// +kubebuilder:validation:Enum=Pending;Running;Succeeded;Failed;Unknown
 	Phase RunnerPhase `json:"phase,omitempty"`
 
 	// ObservedGeneration is the last generation the controller reconciled.
@@ -133,6 +136,12 @@ type RunnerStatus struct {
 	// ResourceHash is a hash of the spec for drift detection.
 	// +optional
 	ResourceHash string `json:"resourceHash,omitempty"`
+
+	// DesiredSpecHash is the hash of the spec that was deferred due to a running Job.
+	// Set when spec drift is deferred, cleared when the drift is resolved.
+	// Survives controller restarts so a deferred drift is not forgotten.
+	// +optional
+	DesiredSpecHash string `json:"desiredSpecHash,omitempty"`
 
 	// StartTime is when the runner started execution.
 	// +optional

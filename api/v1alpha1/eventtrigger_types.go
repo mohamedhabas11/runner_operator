@@ -10,6 +10,8 @@ type WebhookConfig struct {
 	// Path is the HTTP path for this webhook (e.g. "/webhooks/github-push").
 	// Must be unique across all EventTriggers in the cluster.
 	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=^/
 	Path string `json:"path"`
 
 	// SecretRef references a Secret containing the HMAC secret for payload validation.
@@ -26,10 +28,12 @@ type WebhookConfig struct {
 type ParameterMapping struct {
 	// Name of the environment variable to set on the created workflow.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 
 	// Source is a dot-path into the webhook JSON payload (e.g. "$.ref").
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	Source string `json:"source"`
 
 	// Sanitize strips shell metacharacters from the extracted value.
@@ -69,6 +73,7 @@ type RateLimitConfig struct {
 type WorkflowTemplateRef struct {
 	// Name of the Workflow template CR to instantiate.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 
 	// Namespace of the Workflow template. Defaults to the trigger's namespace.

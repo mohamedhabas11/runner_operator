@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/utils/ptr"
 
 	v1alpha1 "github.com/mohamedhabas11/runner_operator/api/v1alpha1"
 )
@@ -132,10 +131,10 @@ func BuildInitContainer(gitRepo *v1alpha1.GitRepo, strategy AuthStrategy) corev1
 		Args:         []string{script},
 		VolumeMounts: mounts,
 		SecurityContext: &corev1.SecurityContext{
-			RunAsNonRoot:             ptr.To(true),
-			RunAsUser:                ptr.To(int64(1000)),
-			AllowPrivilegeEscalation: ptr.To(false),
-			ReadOnlyRootFilesystem:   ptr.To(true),
+			RunAsNonRoot:             new(true),
+			RunAsUser:                new(int64(1000)),
+			AllowPrivilegeEscalation: new(false),
+			ReadOnlyRootFilesystem:   new(true),
 			Capabilities: &corev1.Capabilities{
 				Drop: []corev1.Capability{"ALL"},
 			},

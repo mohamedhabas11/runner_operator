@@ -320,12 +320,14 @@ spec:
                     type: string
                   url:
                     description: URL of the Git repository to clone (HTTPS or SSH).
+                    minLength: 1
                     type: string
                 required:
                 - url
                 type: object
               image:
                 description: Image is the Docker image to run.
+                minLength: 1
                 type: string
               mounts:
                 description: Mounts defines volume mounts for the runner container.
@@ -2429,6 +2431,12 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              desiredSpecHash:
+                description: |-
+                  DesiredSpecHash is the hash of the spec that was deferred due to a running Job.
+                  Set when spec drift is deferred, cleared when the drift is resolved.
+                  Survives controller restarts so a deferred drift is not forgotten.
+                type: string
               observedGeneration:
                 description: ObservedGeneration is the last generation the controller
                   reconciled.
@@ -2436,6 +2444,12 @@ spec:
                 type: integer
               phase:
                 description: Phase is the current lifecycle phase.
+                enum:
+                - Pending
+                - Running
+                - Succeeded
+                - Failed
+                - Unknown
                 type: string
               resourceHash:
                 description: ResourceHash is a hash of the spec for drift detection.

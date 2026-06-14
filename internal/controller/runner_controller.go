@@ -14,7 +14,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -95,6 +94,7 @@ func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 
 		patchBase := client.MergeFrom(runner.DeepCopy())
+		runner.Status.DesiredSpecHash = ""
 		runner.Status.Phase = runnersv1alpha1.RunnerPhasePending
 		runner.Status.ResourceHash = specHash
 		runner.Status.ObservedGeneration = runner.Generation
@@ -124,18 +124,32 @@ func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, err
 	}
 
-	// Spec drift detected: the ResourceHash differs from the current spec hash.
+	// Spec drift detected: the ResourceHash differs from the current spec hash,
+	// or a DesiredSpecHash from a previous defer cycle indicates pending drift.
 	// If the Job is still running, defer deletion to avoid interrupting execution.
 	// Once the Job is finished (or hasn't started), delete it so the next reconcile
 	// recreates it with the new spec.
-	if runner.Status.ResourceHash != specHash {
+	if runner.Status.ResourceHash != specHash || runner.Status.DesiredSpecHash != "" {
 		if existingJob.Status.StartTime != nil && existingJob.Status.CompletionTime == nil {
-			logger.Info("Spec drift detected but Job is running, deferring update")
+			if runner.Status.ResourceHash != specHash {
+				logger.Info("Spec drift detected but Job is running, deferring update")
+				runner.Status.DesiredSpecHash = specHash
+			}
 			patchBase := client.MergeFrom(runner.DeepCopy())
 			setRunnerCondition(runner, metav1.ConditionFalse, ReasonRunnerSpecDriftDeferred, "Spec drift deferred until Job completes")
 			if err := r.Status().Patch(ctx, runner, patchBase); err != nil {
 				return ctrl.Result{}, err
 			}
+			return ctrl.Result{}, nil
+		}
+		// Stale DesiredSpecHash with no real drift: spec matches running Job, clear it.
+		if runner.Status.ResourceHash == specHash {
+			runner.Status.DesiredSpecHash = ""
+			patchBase := client.MergeFrom(runner.DeepCopy())
+			if err := r.Status().Patch(ctx, runner, patchBase); err != nil {
+				return ctrl.Result{}, err
+			}
+			logger.Info("Cleared stale DesiredSpecHash, spec matches running Job")
 			return ctrl.Result{}, nil
 		}
 		// Re-run validation on the new spec before replacing the Job.
@@ -149,6 +163,8 @@ func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		logger.Info("Spec drift detected, deleting and recreating Job")
 		r.Recorder.Event(runner, corev1.EventTypeNormal, "SpecDrift", "Spec changed, recreating Job")
 		patchBase := client.MergeFrom(runner.DeepCopy())
+		runner.Status.DesiredSpecHash = ""
+		runner.Status.ResourceHash = specHash
 		setRunnerCondition(runner, metav1.ConditionFalse, ReasonRunnerSpecDriftReplaced, "Spec changed, recreating Job")
 		if err := r.Status().Patch(ctx, runner, patchBase); err != nil {
 			return ctrl.Result{}, err
@@ -176,8 +192,8 @@ func (r *RunnerReconciler) buildJob(runner *runnersv1alpha1.Runner, jobName, spe
 			Resources:    runner.Spec.Resources,
 			VolumeMounts: runner.Spec.Mounts,
 			SecurityContext: &corev1.SecurityContext{
-				AllowPrivilegeEscalation: ptr.To(false),
-				ReadOnlyRootFilesystem:   ptr.To(true),
+				AllowPrivilegeEscalation: new(false),
+				ReadOnlyRootFilesystem:   new(true),
 				Capabilities: &corev1.Capabilities{
 					Drop: []corev1.Capability{"ALL"},
 				},
@@ -248,8 +264,8 @@ func (r *RunnerReconciler) buildJob(runner *runnersv1alpha1.Runner, jobName, spe
 
 func runnerSecurityContext() *corev1.PodSecurityContext {
 	return &corev1.PodSecurityContext{
-		RunAsNonRoot: ptr.To(true),
-		RunAsUser:    ptr.To(int64(1000)),
+		RunAsNonRoot: new(true),
+		RunAsUser:    new(int64(1000)),
 		SeccompProfile: &corev1.SeccompProfile{
 			Type: corev1.SeccompProfileTypeRuntimeDefault,
 		},

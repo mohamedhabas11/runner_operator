@@ -60,6 +60,9 @@ var _ = Describe("EventTrigger Controller", func() {
 						Webhook: &runnersv1alpha1.WebhookConfig{
 							Path: "/test-webhook",
 						},
+						WorkflowTemplate: runnersv1alpha1.WorkflowTemplateRef{
+							Name: "test-template",
+						},
 					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
