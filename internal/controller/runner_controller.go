@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -21,6 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	runnersv1alpha1 "github.com/mohamedhabas11/runner_operator/api/v1alpha1"
+	"github.com/mohamedhabas11/runner_operator/internal/gitops"
 )
 
 // RunnerReconciler reconciles a Runner object.
@@ -60,6 +60,9 @@ func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	existingJob := &batchv1.Job{}
 	err = r.Get(ctx, types.NamespacedName{Name: jobName, Namespace: runner.Namespace}, existingJob)
 
+	// Job does not exist — first reconcile: set status to Pending, store a hash of the
+	// spec for drift detection, then create the Kubernetes Job. Patching status before
+	// creation ensures the user sees the Pending phase even if the Job create fails.
 	if apierrors.IsNotFound(err) {
 		patchBase := client.MergeFrom(runner.DeepCopy())
 		runner.Status.Phase = runnersv1alpha1.RunnerPhasePending
@@ -90,6 +93,10 @@ func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, err
 	}
 
+	// Spec drift detected: the ResourceHash differs from the current spec hash.
+	// If the Job is still running, defer deletion to avoid interrupting execution.
+	// Once the Job is finished (or hasn't started), delete it so the next reconcile
+	// recreates it with the new spec.
 	if runner.Status.ResourceHash != specHash {
 		if existingJob.Status.StartTime != nil && existingJob.Status.CompletionTime == nil {
 			logger.Info("Spec drift detected but Job is running, deferring update")
@@ -133,36 +140,17 @@ func (r *RunnerReconciler) buildJob(runner *runnersv1alpha1.Runner, jobName, spe
 	var initContainers []corev1.Container
 
 	if runner.Spec.GitRepo != nil {
-		gitVolumeName := "runner-operator-git-repo"
-		gitCloneVolume := corev1.Volume{
-			Name: gitVolumeName,
-			VolumeSource: corev1.VolumeSource{
-				EmptyDir: &corev1.EmptyDirVolumeSource{},
-			},
-		}
-		volumes = append(volumes, gitCloneVolume)
+		strategy := gitops.NewAuthStrategy(runner.Spec.GitRepo)
+		volumes = append(volumes, gitops.BuildVolumes(runner.Spec.GitRepo, strategy)...)
 
-		if runner.Spec.GitRepo.Auth != nil && runner.Spec.GitRepo.Auth.SecretRef != nil {
-			volumes = append(volumes, corev1.Volume{
-				Name: "runner-operator-git-auth",
-				VolumeSource: corev1.VolumeSource{
-					Secret: &corev1.SecretVolumeSource{
-						SecretName: runner.Spec.GitRepo.Auth.SecretRef.Name,
-					},
-				},
-			})
-		}
+		containers[0].VolumeMounts = append(containers[0].VolumeMounts, corev1.VolumeMount{
+			Name:      gitops.WorkspaceVolumeName,
+			MountPath: gitops.WorkspaceMountPath,
+		})
 
-		gitMount := corev1.VolumeMount{
-			Name:      gitVolumeName,
-			MountPath: "/workspace",
-		}
-		containers[0].VolumeMounts = append(containers[0].VolumeMounts, gitMount)
+		initContainers = append(initContainers, gitops.BuildInitContainer(runner.Spec.GitRepo, strategy))
 
-		initContainer := buildGitInitContainer(runner.Spec.GitRepo, gitVolumeName)
-		initContainers = append(initContainers, initContainer)
-
-		workDir := "/workspace/repo"
+		workDir := gitops.WorkspaceMountPath + "/" + gitops.RepoSubPath
 		if runner.Spec.GitRepo.Path != "" {
 			workDir = workDir + "/" + runner.Spec.GitRepo.Path
 		}
@@ -217,73 +205,6 @@ func runnerSecurityContext() *corev1.PodSecurityContext {
 			Type: corev1.SeccompProfileTypeRuntimeDefault,
 		},
 	}
-}
-
-func buildGitInitContainer(gitRepo *runnersv1alpha1.GitRepo, volumeName string) corev1.Container {
-	script := buildGitCloneScript(gitRepo)
-
-	c := corev1.Container{
-		Name:    "git-clone",
-		Image:   "alpine/git:latest",
-		Command: []string{"/bin/sh", "-c"},
-		Args:    []string{script},
-		VolumeMounts: []corev1.VolumeMount{
-			{Name: volumeName, MountPath: "/workspace"},
-		},
-		SecurityContext: &corev1.SecurityContext{
-			RunAsNonRoot:             ptr.To(true),
-			RunAsUser:                ptr.To(int64(1000)),
-			AllowPrivilegeEscalation: ptr.To(false),
-			Capabilities: &corev1.Capabilities{
-				Drop: []corev1.Capability{"ALL"},
-			},
-		},
-	}
-
-	if gitRepo.Auth != nil && gitRepo.Auth.SecretRef != nil {
-		c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{
-			Name:      "runner-operator-git-auth",
-			MountPath: "/etc/git-auth",
-			ReadOnly:  true,
-		})
-	}
-
-	return c
-}
-
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
-}
-
-func buildGitCloneScript(gitRepo *runnersv1alpha1.GitRepo) string {
-	cloneURL := shellQuote(gitRepo.URL)
-	var script string
-
-	if gitRepo.Auth != nil && gitRepo.Auth.SecretRef != nil {
-		script += `if [ -f /etc/git-auth/ssh-privatekey ]; then
-   mkdir -p ~/.ssh
-   cp /etc/git-auth/ssh-privatekey ~/.ssh/id_rsa
-   chmod 600 ~/.ssh/id_rsa
-   ssh-keyscan github.com gitlab.com bitbucket.org >> ~/.ssh/known_hosts 2>/dev/null || true
-fi
-`
-	}
-
-	script += "git clone --depth 1 -- " + cloneURL + " /workspace/repo"
-	if gitRepo.Revision != "" {
-		rev := shellQuote(gitRepo.Revision)
-		script += " && git -C /workspace/repo fetch origin -- " + rev + " && git -C /workspace/repo checkout " + rev
-	}
-
-	if gitRepo.Path != "" {
-		script += " && cd /workspace/repo/" + gitRepo.Path
-	}
-
-	if gitRepo.Auth != nil && gitRepo.Auth.SecretRef != nil {
-		script += ` && rm -rf ~/.ssh`
-	}
-
-	return script
 }
 
 func (r *RunnerReconciler) updateStatusFromJob(ctx context.Context, runner *runnersv1alpha1.Runner, job *batchv1.Job) (ctrl.Result, error) {
@@ -353,6 +274,8 @@ func (r *RunnerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
+// computeSpecHash returns a deterministic hash of any spec struct. Uses the first
+// 8 bytes of SHA-256 — sufficient collision resistance for operator-scale objects.
 func computeSpecHash(spec any) (string, error) {
 	data, err := json.Marshal(spec)
 	if err != nil {

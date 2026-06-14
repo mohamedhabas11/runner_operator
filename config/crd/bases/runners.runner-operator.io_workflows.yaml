@@ -223,8 +223,9 @@ spec:
                             secretRef:
                               description: |-
                                 SecretRef references a Secret containing Git credentials.
-                                For SSH auth: the secret must have key "ssh-privatekey".
-                                For HTTPS auth: the secret must have keys "username" and "password".
+                                  - For ssh: key "ssh-privatekey" (required), "known_hosts" (optional)
+                                  - For basicAuth: keys "username" and "password"
+                                  - For token: key "token" (used as HTTPS password with empty username)
                               properties:
                                 name:
                                   default: ""
@@ -237,7 +238,23 @@ spec:
                                   type: string
                               type: object
                               x-kubernetes-map-type: atomic
+                            type:
+                              description: |-
+                                Type selects the authentication method: "ssh", "basicAuth", or "token".
+                                When omitted, the controller auto-detects based on the URL scheme and
+                                the keys present in the referenced Secret.
+                              enum:
+                              - ssh
+                              - basicAuth
+                              - token
+                              type: string
+                          required:
+                          - secretRef
                           type: object
+                        image:
+                          description: Image overrides the default Git image (alpine/git:2.47.2)
+                            used for cloning.
+                          type: string
                         path:
                           description: |-
                             Path within the repository to use as the working directory.
@@ -508,8 +525,9 @@ spec:
                                   secretRef:
                                     description: |-
                                       SecretRef references a Secret containing Git credentials.
-                                      For SSH auth: the secret must have key "ssh-privatekey".
-                                      For HTTPS auth: the secret must have keys "username" and "password".
+                                        - For ssh: key "ssh-privatekey" (required), "known_hosts" (optional)
+                                        - For basicAuth: keys "username" and "password"
+                                        - For token: key "token" (used as HTTPS password with empty username)
                                     properties:
                                       name:
                                         default: ""
@@ -522,7 +540,23 @@ spec:
                                         type: string
                                     type: object
                                     x-kubernetes-map-type: atomic
+                                  type:
+                                    description: |-
+                                      Type selects the authentication method: "ssh", "basicAuth", or "token".
+                                      When omitted, the controller auto-detects based on the URL scheme and
+                                      the keys present in the referenced Secret.
+                                    enum:
+                                    - ssh
+                                    - basicAuth
+                                    - token
+                                    type: string
+                                required:
+                                - secretRef
                                 type: object
+                              image:
+                                description: Image overrides the default Git image
+                                  (alpine/git:2.47.2) used for cloning.
+                                type: string
                               path:
                                 description: |-
                                   Path within the repository to use as the working directory.
@@ -812,8 +846,9 @@ spec:
                             secretRef:
                               description: |-
                                 SecretRef references a Secret containing Git credentials.
-                                For SSH auth: the secret must have key "ssh-privatekey".
-                                For HTTPS auth: the secret must have keys "username" and "password".
+                                  - For ssh: key "ssh-privatekey" (required), "known_hosts" (optional)
+                                  - For basicAuth: keys "username" and "password"
+                                  - For token: key "token" (used as HTTPS password with empty username)
                               properties:
                                 name:
                                   default: ""
@@ -826,7 +861,23 @@ spec:
                                   type: string
                               type: object
                               x-kubernetes-map-type: atomic
+                            type:
+                              description: |-
+                                Type selects the authentication method: "ssh", "basicAuth", or "token".
+                                When omitted, the controller auto-detects based on the URL scheme and
+                                the keys present in the referenced Secret.
+                              enum:
+                              - ssh
+                              - basicAuth
+                              - token
+                              type: string
+                          required:
+                          - secretRef
                           type: object
+                        image:
+                          description: Image overrides the default Git image (alpine/git:2.47.2)
+                            used for cloning.
+                          type: string
                         path:
                           description: |-
                             Path within the repository to use as the working directory.

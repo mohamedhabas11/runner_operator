@@ -16,13 +16,30 @@ const (
 	RunnerPhaseUnknown   RunnerPhase = "Unknown"
 )
 
+// GitAuthType defines the authentication method for Git operations.
+type GitAuthType string
+
+const (
+	GitAuthTypeSSH       GitAuthType = "ssh"
+	GitAuthTypeBasicAuth GitAuthType = "basicAuth"
+	GitAuthTypeToken     GitAuthType = "token"
+)
+
 // GitAuth defines authentication for cloning a Git repository.
 type GitAuth struct {
-	// SecretRef references a Secret containing Git credentials.
-	// For SSH auth: the secret must have key "ssh-privatekey".
-	// For HTTPS auth: the secret must have keys "username" and "password".
+	// Type selects the authentication method: "ssh", "basicAuth", or "token".
+	// When omitted, the controller auto-detects based on the URL scheme and
+	// the keys present in the referenced Secret.
 	// +optional
-	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
+	// +kubebuilder:validation:Enum=ssh;basicAuth;token
+	Type GitAuthType `json:"type,omitempty"`
+
+	// SecretRef references a Secret containing Git credentials.
+	//   - For ssh: key "ssh-privatekey" (required), "known_hosts" (optional)
+	//   - For basicAuth: keys "username" and "password"
+	//   - For token: key "token" (used as HTTPS password with empty username)
+	// +required
+	SecretRef corev1.LocalObjectReference `json:"secretRef"`
 }
 
 // GitRepo defines a Git repository to clone before executing the runner.
@@ -44,6 +61,10 @@ type GitRepo struct {
 	// Auth defines authentication for private repositories.
 	// +optional
 	Auth *GitAuth `json:"auth,omitempty"`
+
+	// Image overrides the default Git image (alpine/git:2.47.2) used for cloning.
+	// +optional
+	Image string `json:"image,omitempty"`
 }
 
 // RunnerSpec defines the desired state of Runner.
