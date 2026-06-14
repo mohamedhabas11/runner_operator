@@ -323,21 +323,26 @@ func (s *Server) createWorkflow(ctx context.Context, trigger runnersv1alpha1.Eve
 		},
 	}
 
-	// Inject parameters as env vars on the first step
-	if len(params) > 0 && len(workflow.Spec.Steps) > 0 {
-		for k, v := range params {
-			workflow.Spec.Steps[0].Env = append(workflow.Spec.Steps[0].Env, corev1.EnvVar{
-				Name:  k,
-				Value: v,
-			})
+	// Inject parameters as env vars on every step so all stages of the workflow
+	// have access to the webhook payload fields regardless of template structure.
+	if len(params) > 0 {
+		for i := range workflow.Spec.Steps {
+			for k, v := range params {
+				workflow.Spec.Steps[i].Env = append(workflow.Spec.Steps[i].Env, corev1.EnvVar{
+					Name:  k,
+					Value: v,
+				})
+			}
 		}
-	}
-	if len(params) > 0 && len(workflow.Spec.Jobs) > 0 && len(workflow.Spec.Jobs[0].Steps) > 0 {
-		for k, v := range params {
-			workflow.Spec.Jobs[0].Steps[0].Env = append(workflow.Spec.Jobs[0].Steps[0].Env, corev1.EnvVar{
-				Name:  k,
-				Value: v,
-			})
+		for j := range workflow.Spec.Jobs {
+			for i := range workflow.Spec.Jobs[j].Steps {
+				for k, v := range params {
+					workflow.Spec.Jobs[j].Steps[i].Env = append(workflow.Spec.Jobs[j].Steps[i].Env, corev1.EnvVar{
+						Name:  k,
+						Value: v,
+					})
+				}
+			}
 		}
 	}
 
