@@ -329,9 +329,18 @@ func (r *RunnerReconciler) validateGitRepoSecret(ctx context.Context, runner *ru
 		return fmt.Errorf("git auth secret %q not found: %w", secretName, err)
 	}
 	requiredKeys := gitops.RequiredSecretKeys(runner.Spec.GitRepo)
+	if err := checkSecretHasKeys(secret, secretName, requiredKeys); err != nil {
+		return err
+	}
+	return nil
+}
+
+// checkSecretHasKeys verifies that all requiredKeys exist in the Secret's Data
+// map. Returns a user-facing error if any key is missing.
+func checkSecretHasKeys(secret *corev1.Secret, name string, requiredKeys []string) error {
 	for _, key := range requiredKeys {
 		if _, ok := secret.Data[key]; !ok {
-			return fmt.Errorf("git auth secret %q missing required key %q", secretName, key)
+			return fmt.Errorf("git auth secret %q missing required key %q", name, key)
 		}
 	}
 	return nil

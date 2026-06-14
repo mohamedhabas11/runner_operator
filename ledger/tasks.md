@@ -10,6 +10,8 @@
 
 - [ ] **Add namespace validation webhook** — Scaffold via `kubebuilder create webhook --group runners --version v1alpha1 --kind EventTrigger --programmatic-validation`. Validate: `Webhook.Path` uniqueness, `WorkflowTemplate.Name` non-empty, `AllowedNamespaces` entries valid DNS labels. **Blocked on cert-manager install** — cert-manager must be running in the cluster before scaffolding. Setup docs added to `arch/blueprint.md` §Cert-Manager Setup. Scaffold command: `kubebuilder create webhook --group runners --version v1alpha1 --kind EventTrigger --programmatic-validation`.
 
+- [x] **GitRepo secret pre-flight validation** — ✅ Implemented: `validateGitRepoSecret(ctx, runner)` checks that the Git auth Secret exists and contains all required keys (ssh-privatekey, username+password, or token) before the Job is created. Key-checking logic extracted to pure function `checkSecretHasKeys` with 5 unit tests. Condition `ReasonRunnerValidationFailed` + K8s Event on failure.
+
 #### P1 — Important
 
 - [x] **Capture Pod logs in Workflow step status** — ✅ Implemented: `fetchPodLogs` helper fetches last 50 lines of "runner" container logs (capped at 4 KiB) when a step transitions to Failed. Stored in `StepStatus.Message`. Uses `kubernetes.Clientset` from reconciler, initialized in `SetupWithManager`. RBAC for pods + pods/log added.
