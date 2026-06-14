@@ -253,9 +253,41 @@
 **E2E compilation:** `go vet -tags=e2e ./test/e2e/` — OK
 **Lint:** `make lint-fix` — 0 issues
 
+---
+
+### Session 16 — External Code Review (ReviewScorer)
+
+**Review score: 7/10.** 15 findings spanning validation, HA operability, test depth, CRD schemas, and resource efficiency.
+
+**Source:** `REVIEW_SCORING.md` — fanned out to `ledger/review.md` as actionable task items.
+
+**Key findings by severity:**
+
+| Sev | Finding | Effort | Leads to |
+|-----|---------|--------|----------|
+| 🔴 Critical | No admission/validation webhooks (F1) | 4h | ST-1 |
+| 🟠 High | Integration tests are smoke-only (F2) | 5h | ST-3 |
+| 🟠 High | Rate limiting per-replica, HA bypass (F3) | 5h | MT-2 |
+| 🟠 High | Namespace quota is O(N) list (F4) | 3h | MT-1 |
+| 🟠 High | No finalizer on Runner (F5) | 3h | ST-2 |
+| 🟡 Medium | EventTrigger doesn't watch secrets (F6) | 2h | ST-4 |
+| 🟡 Medium | Spec drift defer lost on restart (F7) | 2h | I-1 |
+| 🟡 Medium | Params injected only to first step (F8) | 2h | ST-5 |
+| 🟡 Medium | fetchPodLogs grabs wrong pod (F9) | 1h | LT-6 |
+| 🟡 Medium | No CRD validation markers (F10) | 1h | I-2 |
+| 🟡 Medium | Leader election default false (F11) | 15m | I-3 |
+| 🟢 Low | Path uniqueness O(N) list (F12) | 2h | LT-7 |
+| 🟢 Low | CycleDetector O(N²) (F13) | 1h | LT-4 |
+| 🟢 Low | Timeout lost on controller restart (F14) | 2h | LT-5 |
+| 🟢 Low | No adoption webhook for orphans (F15) | 4h | LT-3 |
+
+**Action plan:** Tackle I-1 → I-2 → I-3 in next session (Immediate bucket, ~3h). Then proceed to Short Term items.
+
+---
+
 ## Open Tasks
 
-All open tasks are tracked in **Session 14** above, organized by priority (P0–P2 + Chores). Items from previous sessions' deferred/skipped sections have been migrated there.
+All open tasks are tracked in `ledger/review.md` organized by time horizon (Immediate → Short Term → Medium Term → Long Term). Items from previous sessions' deferred/skipped sections remain below.
 
 ---
 

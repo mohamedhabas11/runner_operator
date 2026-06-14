@@ -61,6 +61,20 @@ runner-operator is a Kubernetes-native platform for running arbitrary workloads 
 | Gap | Severity | Impact |
 |-----|----------|--------|
 | No validation webhooks | P0 | Invalid CRs accepted, fail at runtime |
+| No finalizer on Runner | P1 | Deleting Runner mid-execution kills Job silently, no recovery |
+| Rate limiting is per-replica (HA bypass) | P1 | N replicas = N × maxPerMinute effective rate |
+| Namespace quota check is O(N) list | P1 | 1000+ workflows → expensive list every reconcile |
+| Integration tests lack behavioral assertions | P2 | False confidence: pass but don't test state transitions |
+| Spec drift defer lost on controller restart | P2 | Deferred drift forgotten after restart |
+| EventTrigger doesn't watch secrets | P2 | HMAC rotation requires manual trigger reconcile |
+| Params injected only to first step | P2 | Template authors must add dummy first step |
+| No CRD validation markers | P2 | API server accepts structurally invalid data |
+| Leader election default false | P2 | HA split-brain risk on scale-out |
+| fetchPodLogs grabs wrong pod on retry | P3 | Logs may come from wrong retry attempt |
+| Path uniqueness check is O(N) list | P3 | 1000+ EventTriggers → heavy list every reconcile |
+| CycleDetector O(N²) complexity | P3 | 500-step workflow → 250K iterations |
+| Workflow timeout lost on controller restart | P3 | No timeout if controller is down past deadline |
+| No adoption webhook for orphaned Jobs | P3 | Runner recreated with same name ignores old Job |
 
 ---
 
@@ -238,7 +252,7 @@ When working on this project:
 
 ---
 
-*Last updated: Session 15 — Code Review Gaps & Metrics Hardening*
+*Last updated: Session 16 — External Code Review Findings*
 
 ---
 
