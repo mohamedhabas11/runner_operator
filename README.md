@@ -1,3 +1,6 @@
+[![CI](https://github.com/mohamedhabas11/runner_operator/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/mohamedhabas11/runner_operator/actions/workflows/test.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/mohamedhabas11/runner_operator)](https://goreportcard.com/report/github.com/mohamedhabas11/runner_operator)
+
 # runner-operator
 
 A Kubernetes operator that runs OCI containers as disposable batch Jobs and
@@ -140,6 +143,12 @@ pod layouts, state machines, and design decisions.
 | `spec.rateLimit.maxPerMinute` | `int` | no | Workflow creations/minute (0 = unlimited) |
 | `spec.rateLimit.maxConcurrent` | `int` | no | Concurrent Workflows (0 = unlimited) |
 | `spec.allowedNamespaces` | `[]string` | no | Namespaces where Workflows may be created |
+
+> **Rate limit in HA mode:** Rate limits are tracked in-memory per replica.
+> With `manager.replicas: N`, the effective rate is `N × maxPerMinute`.
+> For a shared rate limit across replicas, reduce `maxPerMinute` by a factor
+> of `N`, or implement a shared counter using the EventTrigger status as a
+> lease.
 
 ---
 

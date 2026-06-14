@@ -27,3 +27,9 @@ jobs:
         run: |
           go mod tidy
           make test
+
+      - name: Verify dist is up to date
+        run: |
+          make build-installer
+          git diff --exit-code dist/
+          echo "dist/ is up to date"

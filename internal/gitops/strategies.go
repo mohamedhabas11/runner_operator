@@ -30,19 +30,30 @@ type sshAuthStrategy struct {
 	url string // the git clone URL, used to extract the SSH host
 }
 
-func (s *sshAuthStrategy) SetupScript() string {
-	host := extractSSHHost(s.url)
+// pinnedKnownHosts is the default known_hosts content for well-known SCM hosts.
+// Used when the user does not provide a custom known_hosts via the secret.
+// These keys were verified as of 2024-03-24.
+const pinnedKnownHosts = `# github.com
+github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C5skZZOJwFG3PN5z
+github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=
+# gitlab.com
+gitlab.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAfuCHKVTjquxvt6CM6tdG4SLp1Btn/nOeHHE5UOzRdf
+# bitbucket.org
+bitbucket.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIazEu89wgQZ4bqs3d1siqIEEVqyHUVbDp8/om5OItu5
+`
 
+func (s *sshAuthStrategy) SetupScript() string {
 	// Copy the SSH key to writable tmpfs, set permissions, configure known_hosts.
-	// If the secret includes a "known_hosts" file, use that; otherwise, fall
-	// back to ssh-keyscan against the actual repo host.
+	// If the secret includes a "known_hosts" file, use that; otherwise, use
+	// pinned keys for well-known SCM hosts (github, gitlab, bitbucket).
 	return `mkdir -p ` + SSHTmpMountPath + `/.ssh
 cp ` + SecretMountPath + `/ssh-privatekey ` + SSHTmpMountPath + `/.ssh/id_rsa
 chmod 600 ` + SSHTmpMountPath + `/.ssh/id_rsa
 if [ -f ` + SecretMountPath + `/known_hosts ]; then
   cp ` + SecretMountPath + `/known_hosts ` + SSHTmpMountPath + `/.ssh/known_hosts
 else
-  ssh-keyscan ` + shellQuote(host) + ` >> ` + SSHTmpMountPath + `/.ssh/known_hosts 2>/dev/null || true
+  cat > ` + SSHTmpMountPath + `/.ssh/known_hosts << 'EOF'
+` + pinnedKnownHosts + `EOF
 fi
 export GIT_SSH_COMMAND="ssh -i ` + SSHTmpMountPath + `/.ssh/id_rsa -o UserKnownHostsFile=` + SSHTmpMountPath + `/.ssh/known_hosts -o StrictHostKeyChecking=yes"
 `

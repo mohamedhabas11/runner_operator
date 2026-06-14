@@ -181,15 +181,16 @@ type JobSpec struct {
 
 // WorkflowSpec defines the desired state of Workflow.
 type WorkflowSpec struct {
-	// Jobs defines parallel job groups. Supersedes the flat steps field.
-	// When set, the flat steps field is ignored.
+	// Jobs defines parallel job groups. Mutually exclusive with Steps.
+	// If both are set, Jobs takes precedence and Steps is ignored.
 	// +listType=map
 	// +listMapKey=name
 	// +optional
 	Jobs []JobSpec `json:"jobs,omitempty"`
 
 	// Steps defines the ordered steps of the workflow (flat mode).
-	// Ignored when jobs is set. Kept for backward compatibility.
+	// Mutually exclusive with Jobs. Ignored when Jobs is set.
+	// Kept for backward compatibility.
 	// +listType=map
 	// +listMapKey=name
 	// +optional

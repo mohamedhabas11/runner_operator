@@ -313,7 +313,7 @@ func (r *WorkflowReconciler) reconcileStepLoop(
 				if jobName != "" {
 					eventMsg = fmt.Sprintf("Created Runner for step %s in job %s", step.Name, jobName)
 				}
-				r.Recorder.Eventf(wf, corev1.EventTypeNormal, "StepRunnerCreated", eventMsg)
+				r.Recorder.Eventf(wf, corev1.EventTypeNormal, "StepRunnerCreated", "%s", eventMsg)
 				if err := r.Create(ctx, runner); err != nil {
 					logger.Error(err, "Failed to create Runner", "step", step.Name, "job", jobName)
 					continue
@@ -338,7 +338,7 @@ func (r *WorkflowReconciler) reconcileStepLoop(
 					if jobName != "" {
 						retryMsg = fmt.Sprintf("Step %s in job %s failed, retrying (attempt %d/%d)", step.Name, jobName, status.RetryCount+1, step.Retry.MaxRetries)
 					}
-					r.Recorder.Eventf(wf, corev1.EventTypeNormal, "StepRetrying", retryMsg)
+					r.Recorder.Eventf(wf, corev1.EventTypeNormal, "StepRetrying", "%s", retryMsg)
 					StepRetriesTotal.WithLabelValues(wf.Namespace).Inc()
 					if err := r.Delete(ctx, &existing); err != nil {
 						logger.Error(err, "Failed to delete failed Runner for retry", "step", step.Name, "job", jobName)

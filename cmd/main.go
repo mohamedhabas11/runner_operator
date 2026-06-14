@@ -64,7 +64,7 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
-	flag.StringVar(&webhookEventAddr, "webhook-event-addr", ":8080", "The address the webhook event server binds to.")
+	flag.StringVar(&webhookEventAddr, "webhook-event-addr", ":9090", "The address the webhook event server binds to. Must not collide with metrics port.")
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")

@@ -123,8 +123,10 @@ func TestExtractParams(t *testing.T) {
 		{Name: "MISSING_NO_DEFAULT", Source: "$.missing"},
 	}
 
-	params := extractParams(mappings, payload)
-
+	params, err := extractParams(mappings, payload)
+	if err != nil {
+		t.Fatalf("extractParams returned error: %v", err)
+	}
 	if params["GITHUB_REF"] != "refs/heads/feature" {
 		t.Errorf("GITHUB_REF = %q, want %q", params["GITHUB_REF"], "refs/heads/feature")
 	}
@@ -149,8 +151,10 @@ func TestExtractParamsSanitize(t *testing.T) {
 		{Name: "BRANCH_RAW", Source: "$.branch", Sanitize: false},
 	}
 
-	params := extractParams(mappings, payload)
-
+	params, err := extractParams(mappings, payload)
+	if err != nil {
+		t.Fatalf("extractParams returned error: %v", err)
+	}
 	if params["BRANCH"] != "feature rm -rf /" {
 		t.Errorf("Sanitized BRANCH = %q, want %q", params["BRANCH"], "feature rm -rf /")
 	}

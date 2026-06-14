@@ -37,8 +37,17 @@ type ParameterMapping struct {
 	Sanitize bool `json:"sanitize,omitempty"`
 
 	// Default value if the source field is missing from the payload.
+	// Ignored when Required is true.
 	// +optional
 	Default string `json:"default,omitempty"`
+
+	// Required marks this parameter as mandatory. When true and the source
+	// field is missing from the webhook payload, the EventTrigger sets a
+	// Ready=False condition and does not create a Workflow.
+	// When false (default), missing fields produce an empty env var and a
+	// warning-level log entry, and the Workflow is created.
+	// +optional
+	Required bool `json:"required,omitempty"`
 }
 
 // RateLimitConfig controls how aggressively a trigger may create workflows.

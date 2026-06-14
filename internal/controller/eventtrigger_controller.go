@@ -93,6 +93,35 @@ func (r *EventTriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 	}
 
+	// Check for webhook path uniqueness before attempting registration
+	if trigger.Spec.Webhook != nil && trigger.Spec.Webhook.Path != "" {
+		var allTriggers runnersv1alpha1.EventTriggerList
+		if err := r.List(ctx, &allTriggers); err != nil {
+			logger.Error(err, "Failed to list EventTriggers for path uniqueness check")
+			return ctrl.Result{}, err
+		}
+		for i := range allTriggers.Items {
+			existing := allTriggers.Items[i]
+			if existing.UID == trigger.UID {
+				continue
+			}
+			if existing.Spec.Webhook != nil && existing.Spec.Webhook.Path == trigger.Spec.Webhook.Path {
+				logger.Info("Webhook path already in use by another trigger", "path", trigger.Spec.Webhook.Path, "existing", existing.Name)
+				r.Recorder.Eventf(trigger, corev1.EventTypeWarning, "PathCollision",
+					"Webhook path %q already in use by EventTrigger %s", trigger.Spec.Webhook.Path, existing.Name)
+				patchBase := client.MergeFrom(trigger.DeepCopy())
+				trigger.Status.Registered = false
+				trigger.Status.LastError = fmt.Sprintf("webhook path %q already in use by %s", trigger.Spec.Webhook.Path, existing.Name)
+				setTriggerCondition(trigger, metav1.ConditionFalse, ReasonTriggerPathCollision,
+					"Webhook path already in use")
+				if err := r.Status().Patch(ctx, trigger, patchBase); err != nil {
+					return ctrl.Result{}, err
+				}
+				return ctrl.Result{}, nil
+			}
+		}
+	}
+
 	patchBase := client.MergeFrom(trigger.DeepCopy())
 	updated := false
 

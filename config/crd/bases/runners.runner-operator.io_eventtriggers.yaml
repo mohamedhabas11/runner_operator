@@ -68,13 +68,22 @@ spec:
                     to a workflow environment variable.
                   properties:
                     default:
-                      description: Default value if the source field is missing from
-                        the payload.
+                      description: |-
+                        Default value if the source field is missing from the payload.
+                        Ignored when Required is true.
                       type: string
                     name:
                       description: Name of the environment variable to set on the
                         created workflow.
                       type: string
+                    required:
+                      description: |-
+                        Required marks this parameter as mandatory. When true and the source
+                        field is missing from the webhook payload, the EventTrigger sets a
+                        Ready=False condition and does not create a Workflow.
+                        When false (default), missing fields produce an empty env var and a
+                        warning-level log entry, and the Workflow is created.
+                      type: boolean
                     sanitize:
                       description: Sanitize strips shell metacharacters from the extracted
                         value.

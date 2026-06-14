@@ -101,6 +101,7 @@ const (
 	ReasonTriggerRouteRegistered  = "RouteRegistered"
 	ReasonTriggerRouteFailed      = "RouteRegistrationFailed"
 	ReasonTriggerNamespaceBlocked = "NamespaceNotAllowed"
+	ReasonTriggerPathCollision    = "PathCollision"
 	ReasonTriggerReconcileError   = "ReconciliationError"
 
 	// Namespace quota annotation

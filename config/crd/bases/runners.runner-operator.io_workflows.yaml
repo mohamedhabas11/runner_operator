@@ -48,8 +48,8 @@ spec:
             properties:
               jobs:
                 description: |-
-                  Jobs defines parallel job groups. Supersedes the flat steps field.
-                  When set, the flat steps field is ignored.
+                  Jobs defines parallel job groups. Mutually exclusive with Steps.
+                  If both are set, Jobs takes precedence and Steps is ignored.
                 items:
                   description: JobSpec defines a group of steps that share state and
                     execute together.
@@ -656,7 +656,8 @@ spec:
               steps:
                 description: |-
                   Steps defines the ordered steps of the workflow (flat mode).
-                  Ignored when jobs is set. Kept for backward compatibility.
+                  Mutually exclusive with Jobs. Ignored when Jobs is set.
+                  Kept for backward compatibility.
                 items:
                   description: WorkflowStep defines a single step in a Workflow.
                   properties:

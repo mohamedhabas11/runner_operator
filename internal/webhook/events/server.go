@@ -274,7 +274,12 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract parameters
-	params := extractParams(trigger.Spec.Parameters, payload)
+	params, err := extractParams(trigger.Spec.Parameters, payload)
+	if err != nil {
+		logger.Error(err, "Failed to extract required parameters from payload")
+		http.Error(w, "Bad Request: missing required parameter", http.StatusBadRequest)
+		return
+	}
 
 	// Create Workflow
 	if err := s.createWorkflow(r.Context(), trigger, params); err != nil {
@@ -370,10 +375,13 @@ func validateHMAC(secret, body []byte, sig, prefix string) bool {
 	return hmac.Equal([]byte(sig[len(prefix):]), []byte(got))
 }
 
-func extractParams(mappings []runnersv1alpha1.ParameterMapping, payload map[string]any) map[string]string {
+func extractParams(mappings []runnersv1alpha1.ParameterMapping, payload map[string]any) (map[string]string, error) {
 	out := make(map[string]string, len(mappings))
 	for _, m := range mappings {
 		val := extractDotPath(payload, strings.TrimPrefix(m.Source, "$."))
+		if val == "" && m.Required {
+			return nil, fmt.Errorf("required parameter %q (source: %s) not found in payload", m.Name, m.Source)
+		}
 		if val == "" {
 			val = m.Default
 		}
@@ -384,7 +392,7 @@ func extractParams(mappings []runnersv1alpha1.ParameterMapping, payload map[stri
 			out[m.Name] = val
 		}
 	}
-	return out
+	return out, nil
 }
 
 func extractDotPath(data map[string]any, path string) string {

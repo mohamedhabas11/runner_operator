@@ -358,8 +358,11 @@ func TestSSHAuthStrategy_SetupScript(t *testing.T) {
 	s := &sshAuthStrategy{url: "git@github.com:org/repo.git"}
 	script := s.SetupScript()
 
-	if !strings.Contains(script, "ssh-keyscan 'github.com'") {
-		t.Fatal("expected ssh-keyscan for github.com")
+	if !strings.Contains(script, "AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C5skZZOJwFG3PN5z") {
+		t.Fatal("expected pinned github.com known_hosts key")
+	}
+	if strings.Contains(script, "ssh-keyscan") {
+		t.Fatal("ssh-keyscan should not be used; pinned keys replace TOFU")
 	}
 	if !strings.Contains(script, "ssh-privatekey") {
 		t.Fatal("expected ssh-privatekey reference")

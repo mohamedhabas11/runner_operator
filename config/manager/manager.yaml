@@ -63,11 +63,11 @@ spec:
         args:
           - --leader-elect
           - --health-probe-bind-address=:8081
-          - --webhook-event-addr=:8080
+          - --webhook-event-addr=:9090
         image: controller:latest
         name: manager
         ports:
-        - containerPort: 8080
+        - containerPort: 9090
           name: webhook-event
           protocol: TCP
         - containerPort: 8081
