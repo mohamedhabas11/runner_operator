@@ -14,7 +14,7 @@
 
 - [ ] **Capture Pod logs in Workflow step status** — When a step Runner fails, fetch its Pod logs and store them in `WorkflowStepStatus.Message` or a new `Logs` field. Enables debugging without `kubectl logs`. Files: `internal/controller/workflow_controller.go` (reconcile logic), `api/v1alpha1/workflow_types.go` (status field).
 - [ ] **EventTrigger workflow ownership** — In `internal/webhook/events/server.go:createWorkflow`, call `controllerutil.SetControllerReference(trigger, workflow, r.Scheme)` so deleting an EventTrigger cascades to its created Workflows. Requires trigger and workflow in same namespace.
-- [ ] **Implement `gitRepo.Path`** — Field exists in `api/v1alpha1/runner_types.go:42` but `buildGitInitContainer` at `internal/controller/runner_controller.go` ignores it. After `git clone`, `cd /workspace/repo/<path>`. Same fix needed in `internal/gitops/clone.go`.
+- [x] **Implement `gitRepo.Path`** — ✅ Already handled by Session 13 refactoring: `script.go:36-42` validates path existence in init container; `runner_controller.go:153-157` sets `WorkingDir` with path. Original task was stale — written before the gitops factory replaced `buildGitInitContainer`.
 
 #### P2 — Nice to Have
 
