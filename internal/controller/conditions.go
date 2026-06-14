@@ -85,6 +85,7 @@ const (
 	ReasonRunnerSpecDriftDeferred = "SpecDriftDeferred"
 	ReasonRunnerSpecDriftReplaced = "SpecDriftReplaced"
 	ReasonRunnerReconcileError    = "ReconciliationError"
+	ReasonRunnerValidationFailed  = "ValidationFailed"
 
 	// Workflow reasons
 	ReasonWorkflowPending        = "Pending"

@@ -119,6 +119,35 @@ func (s *httpAuthStrategy) VolumeMounts() []corev1.VolumeMount {
 	}
 }
 
+// RequiredSecretKeys returns the mandatory Secret data keys for the given
+// GitRepo auth configuration. Used by the Runner controller for pre-flight
+// validation before creating a Job. Returns nil if auth is nil or type is
+// auto-detected (the caller should validate after NewAuthStrategy resolves it).
+func RequiredSecretKeys(gitRepo *v1alpha1.GitRepo) []string {
+	if gitRepo.Auth == nil {
+		return nil
+	}
+	authType := gitRepo.Auth.Type
+	if authType == "" {
+		// Auto-detect: SSH URLs need ssh-privatekey, HTTPS needs token.
+		if isSSHURL(gitRepo.URL) {
+			authType = v1alpha1.GitAuthTypeSSH
+		} else {
+			authType = v1alpha1.GitAuthTypeToken
+		}
+	}
+	switch authType {
+	case v1alpha1.GitAuthTypeSSH:
+		return []string{"ssh-privatekey"}
+	case v1alpha1.GitAuthTypeBasicAuth:
+		return []string{"username", "password"}
+	case v1alpha1.GitAuthTypeToken:
+		return []string{"token"}
+	default:
+		return nil
+	}
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────────────────────────────────────

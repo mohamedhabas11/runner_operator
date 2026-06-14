@@ -445,3 +445,67 @@ func TestExtractSSHHost(t *testing.T) {
 		}
 	}
 }
+
+func TestRequiredSecretKeys_nilAuth(t *testing.T) {
+	keys := RequiredSecretKeys(&v1alpha1.GitRepo{URL: "https://github.com/org/repo.git"})
+	if keys != nil {
+		t.Fatalf("expected nil for no auth, got %v", keys)
+	}
+}
+
+func TestRequiredSecretKeys_ssh(t *testing.T) {
+	keys := RequiredSecretKeys(&v1alpha1.GitRepo{
+		URL: "git@github.com:org/repo.git",
+		Auth: &v1alpha1.GitAuth{Type: v1alpha1.GitAuthTypeSSH,
+			SecretRef: corev1.LocalObjectReference{Name: "git-ssh"}},
+	})
+	if len(keys) != 1 || keys[0] != "ssh-privatekey" {
+		t.Fatalf("expected [ssh-privatekey], got %v", keys)
+	}
+}
+
+func TestRequiredSecretKeys_autoDetect_ssh(t *testing.T) {
+	keys := RequiredSecretKeys(&v1alpha1.GitRepo{
+		URL: "git@github.com:org/repo.git",
+		Auth: &v1alpha1.GitAuth{
+			SecretRef: corev1.LocalObjectReference{Name: "git-ssh"},
+		},
+	})
+	if len(keys) != 1 || keys[0] != "ssh-privatekey" {
+		t.Fatalf("expected [ssh-privatekey] via auto-detect, got %v", keys)
+	}
+}
+
+func TestRequiredSecretKeys_basicAuth(t *testing.T) {
+	keys := RequiredSecretKeys(&v1alpha1.GitRepo{
+		URL: "https://github.com/org/repo.git",
+		Auth: &v1alpha1.GitAuth{Type: v1alpha1.GitAuthTypeBasicAuth,
+			SecretRef: corev1.LocalObjectReference{Name: "git-basic"}},
+	})
+	if len(keys) != 2 || keys[0] != "username" || keys[1] != "password" {
+		t.Fatalf("expected [username password], got %v", keys)
+	}
+}
+
+func TestRequiredSecretKeys_token(t *testing.T) {
+	keys := RequiredSecretKeys(&v1alpha1.GitRepo{
+		URL: "https://github.com/org/repo.git",
+		Auth: &v1alpha1.GitAuth{Type: v1alpha1.GitAuthTypeToken,
+			SecretRef: corev1.LocalObjectReference{Name: "git-token"}},
+	})
+	if len(keys) != 1 || keys[0] != "token" {
+		t.Fatalf("expected [token], got %v", keys)
+	}
+}
+
+func TestRequiredSecretKeys_autoDetect_https(t *testing.T) {
+	keys := RequiredSecretKeys(&v1alpha1.GitRepo{
+		URL: "https://github.com/org/repo.git",
+		Auth: &v1alpha1.GitAuth{
+			SecretRef: corev1.LocalObjectReference{Name: "git-token"},
+		},
+	})
+	if len(keys) != 1 || keys[0] != "token" {
+		t.Fatalf("expected [token] via auto-detect, got %v", keys)
+	}
+}

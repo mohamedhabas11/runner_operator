@@ -84,6 +84,13 @@ func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			return ctrl.Result{}, err
 		}
 
+		if err := r.validateGitRepoSecret(ctx, runner); err != nil {
+			logger.Error(err, "Git auth secret validation failed")
+			setRunnerCondition(runner, metav1.ConditionFalse, ReasonRunnerValidationFailed, err.Error())
+			r.Recorder.Event(runner, corev1.EventTypeWarning, "ValidationFailed", err.Error())
+			return ctrl.Result{}, err
+		}
+
 		job := r.buildJob(runner, jobName, specHash)
 		if err := controllerutil.SetControllerReference(runner, job, r.Scheme); err != nil {
 			return ctrl.Result{}, err
@@ -304,6 +311,30 @@ func (r *RunnerReconciler) updateStatusFromJob(ctx context.Context, runner *runn
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
+}
+
+// validateGitRepoSecret checks that the Git auth Secret exists and contains
+// all required keys before a Job is created. Returns nil for no auth or public
+// repos. Returns an error with a user-facing message if validation fails.
+func (r *RunnerReconciler) validateGitRepoSecret(ctx context.Context, runner *runnersv1alpha1.Runner) error {
+	if runner.Spec.GitRepo == nil || runner.Spec.GitRepo.Auth == nil {
+		return nil
+	}
+	secretName := runner.Spec.GitRepo.Auth.SecretRef.Name
+	if secretName == "" {
+		return nil
+	}
+	secret := &corev1.Secret{}
+	if err := r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: runner.Namespace}, secret); err != nil {
+		return fmt.Errorf("git auth secret %q not found: %w", secretName, err)
+	}
+	requiredKeys := gitops.RequiredSecretKeys(runner.Spec.GitRepo)
+	for _, key := range requiredKeys {
+		if _, ok := secret.Data[key]; !ok {
+			return fmt.Errorf("git auth secret %q missing required key %q", secretName, key)
+		}
+	}
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
