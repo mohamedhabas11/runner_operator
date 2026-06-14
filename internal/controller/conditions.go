@@ -101,4 +101,7 @@ const (
 	ReasonTriggerRouteFailed      = "RouteRegistrationFailed"
 	ReasonTriggerNamespaceBlocked = "NamespaceNotAllowed"
 	ReasonTriggerReconcileError   = "ReconciliationError"
+
+	// Namespace quota annotation
+	MaxWorkflowsAnnotation = "runner-operator.io/max-concurrent-workflows"
 )

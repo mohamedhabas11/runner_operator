@@ -19,8 +19,8 @@
 #### P2 — Nice to Have
 
 - [x] **Workflow step DAG topological sort** — ✅ Implemented: `topologicalSortSteps` (Kahn's algorithm) sorts steps by dependency order. Wired into `reconcileFlatWorkflow` and `reconcileJobSteps` before the reconcile loop. 3 unit tests (no-deps, linear chain, count preservation).
-- [ ] **Prometheus metrics** — Add `controller_runtime_metrics` for: reconciliation count, duration, error rate, job completion rate, workflow phase transitions. Use `metrics.Registry` from `controller-runtime`. File: `internal/controller/` (both controllers).
-- [ ] **Namespace quotas** — Add `MaxConcurrentWorkflows` field to `WorkflowSpec` or controller config. Track active workflows per namespace and reject new ones when quota exceeded.
+- [x] **Prometheus metrics** — ✅ Implemented: `internal/controller/metrics.go` with `RunnerJobCompletedTotal`, `WorkflowPhaseTransitions`, `WorkflowDurationSeconds`, `StepRetriesTotal`. Registered via controller-runtime `metrics.Registry`. Incremented at each phase transition in both Runner and Workflow controllers.
+- [x] **Namespace quotas** — ✅ Implemented: annotation `runner-operator.io/max-concurrent-workflows` on Namespace resource. Checked in both flat and job workflow paths before first reconcile. Requeues with condition when quota exceeded. RBAC for namespace read added.
 - [x] **Cross-namespace template workflow decision** — ✅ Decision documented in `arch/blueprint.md`: template lives in any namespace; created Workflow lives in trigger namespace (tenant isolation). Already implemented in `server.go:299`.
 - [x] **SharedVolume PVC cross-namespace docs** — ✅ Documented in `arch/blueprint.md`: PVC refs are namespace-scoped per K8s design; use EmptyDir or CSI for cross-namespace.
 - [x] **Expose `--webhook-event-port` flag docs** — ✅ Added `--webhook-event-addr=:8080` to `config/manager/manager.yaml` args. Documented in `arch/blueprint.md` design decisions.
@@ -28,9 +28,9 @@
 
 #### Chores
 
-- [ ] **Add CI check for README examples** — Use `kubeconform` or `kubectl apply --dry-run=client` to catch drift between CRD schemas and README examples.
+- [ ] **Add CI check for README examples** — Use `kubeconform` or `kubectl apply --dry-run=client` to catch drift.
 - [ ] **Add markdownlint/vale CI check** — For documentation consistency across `.md` files.
-- [ ] **Dependabot config** — Add `.github/dependabot.yml` for GitHub Actions version updates.
+- [ ] **Dependabot config** — Add `.github/dependabot.yml` for GitHub Actions + Go module updates.
 - [x] **Network isolation docs** — ✅ Added `config/network-policy/isolate-tenants.yaml` with tenant isolation NetworkPolicy (blocks cross-tenant traffic, allows operator + DNS). Registered in `kustomization.yaml`.
 
 ---

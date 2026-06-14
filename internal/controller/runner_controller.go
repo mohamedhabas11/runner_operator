@@ -279,12 +279,14 @@ func (r *RunnerReconciler) updateStatusFromJob(ctx context.Context, runner *runn
 		runner.Status.CompletionTime = completionTime
 	}
 	switch phase {
-	case runnersv1alpha1.RunnerPhaseRunning:
-		setRunnerCondition(runner, metav1.ConditionFalse, ReasonRunnerRunning, "Runner is running")
 	case runnersv1alpha1.RunnerPhaseSucceeded:
 		setRunnerCondition(runner, metav1.ConditionTrue, ReasonRunnerSucceeded, "Runner completed successfully")
+		RunnerJobCompletedTotal.WithLabelValues(runner.Namespace, "succeeded").Inc()
 	case runnersv1alpha1.RunnerPhaseFailed:
 		setRunnerCondition(runner, metav1.ConditionFalse, ReasonRunnerFailed, "Runner failed")
+		RunnerJobCompletedTotal.WithLabelValues(runner.Namespace, "failed").Inc()
+	case runnersv1alpha1.RunnerPhaseRunning:
+		setRunnerCondition(runner, metav1.ConditionFalse, ReasonRunnerRunning, "Runner is running")
 	}
 	logger.Info("Runner phase changed", "phase", phase)
 

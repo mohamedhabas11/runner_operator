@@ -46,6 +46,7 @@ type WorkflowReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=pods/log,verbs=get
+// +kubebuilder:rbac:groups=core,resources=namespaces,verbs=get
 
 func (r *WorkflowReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -102,6 +103,22 @@ func (r *WorkflowReconciler) reconcileFlatWorkflow(ctx context.Context, wf *runn
 		}
 	}
 
+	if wf.Status.StartTime == nil {
+		allowed, err := r.checkNamespaceQuota(ctx, wf.Namespace)
+		if err != nil {
+			logger.Error(err, "Failed to check namespace quota", "namespace", wf.Namespace)
+		} else if !allowed {
+			logger.Info("Namespace quota exceeded, deferring workflow", "namespace", wf.Namespace)
+			patchBase := client.MergeFrom(wf.DeepCopy())
+			setWorkflowCondition(wf, metav1.ConditionFalse, "QuotaExceeded", "Namespace has too many active workflows")
+			wf.Status.ObservedGeneration = wf.Generation
+			if err := r.Status().Patch(ctx, wf, patchBase); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+	}
+
 	stepRunners, err := r.listStepRunners(ctx, wf)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -123,6 +140,7 @@ func (r *WorkflowReconciler) reconcileFlatWorkflow(ctx context.Context, wf *runn
 		r.Recorder.Eventf(wf, corev1.EventTypeNormal, "PhaseChanged", "Workflow phase changed to %s", newPhase)
 		wf.Status.Phase = newPhase
 		updated = true
+		WorkflowPhaseTransitions.WithLabelValues(wf.Namespace, string(newPhase)).Inc()
 		switch newPhase {
 		case runnersv1alpha1.WorkflowPhaseRunning:
 			setWorkflowCondition(wf, metav1.ConditionFalse, ReasonWorkflowRunning, "Workflow is running")
@@ -136,6 +154,10 @@ func (r *WorkflowReconciler) reconcileFlatWorkflow(ctx context.Context, wf *runn
 		now := metav1.Now()
 		wf.Status.CompletionTime = &now
 		updated = true
+		if wf.Status.StartTime != nil {
+			duration := now.Sub(wf.Status.StartTime.Time).Seconds()
+			WorkflowDurationSeconds.WithLabelValues(wf.Namespace).Observe(duration)
+		}
 	}
 
 	if updated {
@@ -317,6 +339,7 @@ func (r *WorkflowReconciler) reconcileStepLoop(
 						retryMsg = fmt.Sprintf("Step %s in job %s failed, retrying (attempt %d/%d)", step.Name, jobName, status.RetryCount+1, step.Retry.MaxRetries)
 					}
 					r.Recorder.Eventf(wf, corev1.EventTypeNormal, "StepRetrying", retryMsg)
+					StepRetriesTotal.WithLabelValues(wf.Namespace).Inc()
 					if err := r.Delete(ctx, &existing); err != nil {
 						logger.Error(err, "Failed to delete failed Runner for retry", "step", step.Name, "job", jobName)
 					}
@@ -648,6 +671,22 @@ func (r *WorkflowReconciler) reconcileJobWorkflow(ctx context.Context, wf *runne
 		}
 	}
 
+	if wf.Status.StartTime == nil {
+		allowed, err := r.checkNamespaceQuota(ctx, wf.Namespace)
+		if err != nil {
+			logger.Error(err, "Failed to check namespace quota", "namespace", wf.Namespace)
+		} else if !allowed {
+			logger.Info("Namespace quota exceeded, deferring workflow", "namespace", wf.Namespace)
+			patchBase := client.MergeFrom(wf.DeepCopy())
+			setWorkflowCondition(wf, metav1.ConditionFalse, "QuotaExceeded", "Namespace has too many active workflows")
+			wf.Status.ObservedGeneration = wf.Generation
+			if err := r.Status().Patch(ctx, wf, patchBase); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+	}
+
 	allRunners, err := r.listStepRunners(ctx, wf)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -673,6 +712,7 @@ func (r *WorkflowReconciler) reconcileJobWorkflow(ctx context.Context, wf *runne
 		r.Recorder.Eventf(wf, corev1.EventTypeNormal, "PhaseChanged", "Workflow phase changed to %s", newPhase)
 		wf.Status.Phase = newPhase
 		updated = true
+		WorkflowPhaseTransitions.WithLabelValues(wf.Namespace, string(newPhase)).Inc()
 		switch newPhase {
 		case runnersv1alpha1.WorkflowPhaseRunning:
 			setWorkflowCondition(wf, metav1.ConditionFalse, ReasonWorkflowRunning, "Workflow is running")
@@ -686,6 +726,10 @@ func (r *WorkflowReconciler) reconcileJobWorkflow(ctx context.Context, wf *runne
 		now := metav1.Now()
 		wf.Status.CompletionTime = &now
 		updated = true
+		if wf.Status.StartTime != nil {
+			duration := now.Sub(wf.Status.StartTime.Time).Seconds()
+			WorkflowDurationSeconds.WithLabelValues(wf.Namespace).Observe(duration)
+		}
 	}
 
 	if updated {
@@ -1093,6 +1137,45 @@ func topologicalSortSteps(steps []runnersv1alpha1.WorkflowStep) []runnersv1alpha
 	}
 
 	return sorted
+}
+
+// maxConcurrentWorkflowsForNS reads the namespace annotation
+// runner-operator.io/max-concurrent-workflows and returns the limit (0 = unlimited).
+func (r *WorkflowReconciler) maxConcurrentWorkflowsForNS(ctx context.Context, ns string) (int, error) {
+	nsObj := &corev1.Namespace{}
+	if err := r.Get(ctx, types.NamespacedName{Name: ns}, nsObj); err != nil {
+		return 0, fmt.Errorf("failed to get namespace %s: %w", ns, err)
+	}
+	val, ok := nsObj.Annotations[MaxWorkflowsAnnotation]
+	if !ok || val == "" {
+		return 0, nil
+	}
+	limit := 0
+	if _, err := fmt.Sscanf(val, "%d", &limit); err != nil {
+		return 0, nil
+	}
+	return limit, nil
+}
+
+// checkNamespaceQuota verifies the namespace hasn't exceeded its max concurrent
+// workflow limit. Returns an error string if quota is exceeded (empty = OK).
+func (r *WorkflowReconciler) checkNamespaceQuota(ctx context.Context, ns string) (bool, error) {
+	limit, err := r.maxConcurrentWorkflowsForNS(ctx, ns)
+	if err != nil || limit <= 0 {
+		return true, err
+	}
+
+	wfList := &runnersv1alpha1.WorkflowList{}
+	if err := r.List(ctx, wfList, client.InNamespace(ns)); err != nil {
+		return false, err
+	}
+	active := 0
+	for _, w := range wfList.Items {
+		if !isWorkflowTerminal(w.Status.Phase) {
+			active++
+		}
+	}
+	return active < limit, nil
 }
 
 // maxLogBytes caps the amount of Pod log text stored in a step status.
