@@ -24,6 +24,9 @@ func TestMetrics_initialized(t *testing.T) {
 	if StepRetriesTotal == nil {
 		t.Fatal("StepRetriesTotal must not be nil after init")
 	}
+	if RunnerActiveCount == nil {
+		t.Fatal("RunnerActiveCount must not be nil after init")
+	}
 }
 
 func TestMetrics_canIncrement(t *testing.T) {
@@ -32,6 +35,7 @@ func TestMetrics_canIncrement(t *testing.T) {
 	WorkflowPhaseTransitions.WithLabelValues("ns1", "Running").Inc()
 	StepRetriesTotal.WithLabelValues("ns1").Inc()
 	WorkflowDurationSeconds.WithLabelValues("ns1").Observe(2.5)
+	RunnerActiveCount.WithLabelValues("ns1", "Pending").Inc()
 
 	var m dto.Metric
 	if err := RunnerJobCompletedTotal.WithLabelValues("ns1", "succeeded").Write(&m); err != nil {
@@ -44,6 +48,7 @@ func TestMetrics_canIncrement(t *testing.T) {
 	// Clean up
 	RunnerJobCompletedTotal.Reset()
 	RunnerDurationSeconds.Reset()
+	RunnerActiveCount.Reset()
 	WorkflowPhaseTransitions.Reset()
 	StepRetriesTotal.Reset()
 	WorkflowDurationSeconds.Reset()
@@ -58,6 +63,7 @@ func TestMetrics_describe(t *testing.T) {
 	}{
 		{RunnerJobCompletedTotal, "runner_job_completed_total", "completed Runner jobs"},
 		{RunnerDurationSeconds, "runner_duration_seconds", "Runner execution"},
+		{RunnerActiveCount, "runner_active_count", "active runners"},
 		{WorkflowPhaseTransitions, "workflow_phase_transitions_total", "workflow phase transitions"},
 		{WorkflowDurationSeconds, "workflow_duration_seconds", "workflow execution"},
 		{StepRetriesTotal, "step_retries_total", "step retries"},

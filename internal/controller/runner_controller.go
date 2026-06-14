@@ -47,6 +47,7 @@ type RunnerReconciler struct {
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=batch,resources=jobs/status,verbs=get
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core,resources=secrets,verbs=get
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -72,10 +73,27 @@ func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	existingJob := &batchv1.Job{}
 	err = r.Get(ctx, types.NamespacedName{Name: jobName, Namespace: runner.Namespace}, existingJob)
 
-	// Job does not exist — first reconcile: set status to Pending, store a hash of the
-	// spec for drift detection, then create the Kubernetes Job. Patching status before
-	// creation ensures the user sees the Pending phase even if the Job create fails.
+	// Job does not exist — first reconcile: validate, set status to Pending, store a hash
+	// of the spec for drift detection, then create the Kubernetes Job. Validation runs
+	// BEFORE the first status patch so a validation failure is persisted as a condition.
 	if apierrors.IsNotFound(err) {
+		if err := r.validateGitRepoSecret(ctx, runner); err != nil {
+			logger.Error(err, "Git auth secret validation failed")
+			setRunnerCondition(runner, metav1.ConditionFalse, ReasonRunnerValidationFailed, err.Error())
+			patchBase := client.MergeFrom(runner.DeepCopy())
+			runner.Status.Phase = runnersv1alpha1.RunnerPhasePending
+			runner.Status.ResourceHash = specHash
+			runner.Status.ObservedGeneration = runner.Generation
+			if patchErr := r.Status().Patch(ctx, runner, patchBase); patchErr != nil {
+				logger.Error(patchErr, "Failed to patch status after validation failure")
+				return ctrl.Result{}, patchErr
+			}
+			r.Recorder.Event(runner, corev1.EventTypeWarning, "ValidationFailed", err.Error())
+			// Return nil (not the validation error) to prevent infinite requeue.
+			// The next reconcile only triggers on spec change (generation bump).
+			return ctrl.Result{}, nil
+		}
+
 		patchBase := client.MergeFrom(runner.DeepCopy())
 		runner.Status.Phase = runnersv1alpha1.RunnerPhasePending
 		runner.Status.ResourceHash = specHash
@@ -83,13 +101,7 @@ func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		if err := r.Status().Patch(ctx, runner, patchBase); err != nil {
 			return ctrl.Result{}, err
 		}
-
-		if err := r.validateGitRepoSecret(ctx, runner); err != nil {
-			logger.Error(err, "Git auth secret validation failed")
-			setRunnerCondition(runner, metav1.ConditionFalse, ReasonRunnerValidationFailed, err.Error())
-			r.Recorder.Event(runner, corev1.EventTypeWarning, "ValidationFailed", err.Error())
-			return ctrl.Result{}, err
-		}
+		RunnerActiveCount.WithLabelValues(runner.Namespace, "Pending").Inc()
 
 		job := r.buildJob(runner, jobName, specHash)
 		if err := controllerutil.SetControllerReference(runner, job, r.Scheme); err != nil {
@@ -126,6 +138,14 @@ func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			}
 			return ctrl.Result{}, nil
 		}
+		// Re-run validation on the new spec before replacing the Job.
+		if err := r.validateGitRepoSecret(ctx, runner); err != nil {
+			logger.Error(err, "Git auth secret validation failed on spec drift")
+			setRunnerCondition(runner, metav1.ConditionFalse, ReasonRunnerValidationFailed, err.Error())
+			r.Recorder.Event(runner, corev1.EventTypeWarning, "ValidationFailed", err.Error())
+			return ctrl.Result{}, nil
+		}
+
 		logger.Info("Spec drift detected, deleting and recreating Job")
 		r.Recorder.Event(runner, corev1.EventTypeNormal, "SpecDrift", "Spec changed, recreating Job")
 		patchBase := client.MergeFrom(runner.DeepCopy())
@@ -274,7 +294,8 @@ func (r *RunnerReconciler) updateStatusFromJob(ctx context.Context, runner *runn
 	}
 
 	patchBase := client.MergeFrom(runner.DeepCopy())
-	if runner.Status.Phase != phase {
+	oldPhase := runner.Status.Phase
+	if oldPhase != phase {
 		r.Recorder.Eventf(runner, corev1.EventTypeNormal, "PhaseChanged", "Runner phase changed to %s", phase)
 	}
 	runner.Status.Phase = phase
@@ -285,20 +306,35 @@ func (r *RunnerReconciler) updateStatusFromJob(ctx context.Context, runner *runn
 	if completionTime != nil {
 		runner.Status.CompletionTime = completionTime
 	}
+
+	// Update active runner gauge on phase transitions
+	if oldPhase != phase {
+		if isNonTerminalPhase(oldPhase) {
+			RunnerActiveCount.WithLabelValues(runner.Namespace, string(oldPhase)).Dec()
+		}
+		if isNonTerminalPhase(phase) {
+			RunnerActiveCount.WithLabelValues(runner.Namespace, string(phase)).Inc()
+		}
+	}
+
 	switch phase {
 	case runnersv1alpha1.RunnerPhaseSucceeded:
 		setRunnerCondition(runner, metav1.ConditionTrue, ReasonRunnerSucceeded, "Runner completed successfully")
 		RunnerJobCompletedTotal.WithLabelValues(runner.Namespace, "succeeded").Inc()
 		if runner.Status.StartTime != nil && runner.Status.CompletionTime != nil {
 			duration := runner.Status.CompletionTime.Sub(runner.Status.StartTime.Time).Seconds()
-			RunnerDurationSeconds.WithLabelValues(runner.Namespace).Observe(duration)
+			if duration >= 0 {
+				RunnerDurationSeconds.WithLabelValues(runner.Namespace).Observe(duration)
+			}
 		}
 	case runnersv1alpha1.RunnerPhaseFailed:
 		setRunnerCondition(runner, metav1.ConditionFalse, ReasonRunnerFailed, "Runner failed")
 		RunnerJobCompletedTotal.WithLabelValues(runner.Namespace, "failed").Inc()
 		if runner.Status.StartTime != nil && runner.Status.CompletionTime != nil {
 			duration := runner.Status.CompletionTime.Sub(runner.Status.StartTime.Time).Seconds()
-			RunnerDurationSeconds.WithLabelValues(runner.Namespace).Observe(duration)
+			if duration >= 0 {
+				RunnerDurationSeconds.WithLabelValues(runner.Namespace).Observe(duration)
+			}
 		}
 	case runnersv1alpha1.RunnerPhaseRunning:
 		setRunnerCondition(runner, metav1.ConditionFalse, ReasonRunnerRunning, "Runner is running")
@@ -345,11 +381,14 @@ func (r *RunnerReconciler) validateGitRepoSecret(ctx context.Context, runner *ru
 	return nil
 }
 
-// checkSecretHasKeys verifies that all requiredKeys exist in the Secret's Data
-// map. Returns a user-facing error if any key is missing.
+// checkSecretHasKeys verifies that all requiredKeys exist in the Secret's Data or
+// StringData map (StringData is the unencoded, write-only field). Returns a
+// user-facing error if any key is missing from both maps.
 func checkSecretHasKeys(secret *corev1.Secret, name string, requiredKeys []string) error {
 	for _, key := range requiredKeys {
-		if _, ok := secret.Data[key]; !ok {
+		_, inData := secret.Data[key]
+		_, inStringData := secret.StringData[key]
+		if !inData && !inStringData {
 			return fmt.Errorf("git auth secret %q missing required key %q", name, key)
 		}
 	}
@@ -385,4 +424,10 @@ func metav1TimePtrEqual(a, b *metav1.Time) bool {
 		return false
 	}
 	return a.Time.Equal(b.Time)
+}
+
+// isNonTerminalPhase returns true for phases that represent an active runner.
+// Terminal phases (Succeeded, Failed, Unknown) should not be counted as active.
+func isNonTerminalPhase(phase runnersv1alpha1.RunnerPhase) bool {
+	return phase == runnersv1alpha1.RunnerPhasePending || phase == runnersv1alpha1.RunnerPhaseRunning
 }

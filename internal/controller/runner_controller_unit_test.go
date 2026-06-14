@@ -57,3 +57,14 @@ func TestCheckSecretHasKeys_multipleMissing(t *testing.T) {
 		t.Fatal("expected error when multiple keys are missing")
 	}
 }
+
+func TestCheckSecretHasKeys_stringData(t *testing.T) {
+	secret := &corev1.Secret{
+		StringData: map[string]string{
+			"password": "supersecret",
+		},
+	}
+	if err := checkSecretHasKeys(secret, "git-basic", []string{"password"}); err != nil {
+		t.Fatalf("expected no error for key in StringData, got: %v", err)
+	}
+}

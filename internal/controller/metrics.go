@@ -60,6 +60,16 @@ var (
 		[]string{"namespace"},
 	)
 
+	// RunnerActiveCount tracks the number of runners currently in a non-terminal
+	// phase (Pending, Running). Used to monitor concurrent runner load per namespace.
+	RunnerActiveCount = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "runner_active_count",
+			Help: "Current number of active runners by phase and namespace",
+		},
+		[]string{"namespace", "phase"},
+	)
+
 	// StepRetriesTotal counts step retries across all workflows.
 	StepRetriesTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -76,6 +86,7 @@ func init() {
 	metrics.Registry.MustRegister(
 		RunnerJobCompletedTotal,
 		RunnerDurationSeconds,
+		RunnerActiveCount,
 		WorkflowPhaseTransitions,
 		WorkflowDurationSeconds,
 		StepRetriesTotal,

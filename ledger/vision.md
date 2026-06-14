@@ -238,7 +238,7 @@ When working on this project:
 
 ---
 
-*Last updated: Session 14 — Error Capture, DAG Sort, Metrics & Quotas*
+*Last updated: Session 15 — Code Review Gaps & Metrics Hardening*
 
 ---
 
@@ -357,3 +357,59 @@ All §4 gaps except "No validation webhooks" (P0, deferred — needs cert-manage
 | Metrics registry | controller-runtime `metrics.Registry` | Standard `/metrics` endpoint, no custom server |
 | DAG algorithm | Kahn's (BFS) | Simpler than DFS for dependency ordering |
 | Condition pattern | Builder chain | Guarantees non-empty Reason/Message |
+
+---
+
+## 12. Session 15 — Code Review Gap Resolution & Metrics Hardening
+
+### Changes
+
+| Gap | Severity | Fix | Files |
+|-----|----------|-----|-------|
+| **Gap 1: Patch ordering** — validation ran after first status patch, leaving `ValidationFailed` condition only on subsequent reconciles | P0 | Moved `validateGitRepoSecret` before the Pending status patch. On validation failure, patches status with condition, then returns nil (no requeue). | `runner_controller.go:80-93` |
+| **Gap 2: Missing RBAC** — no `// +kubebuilder:rbac:groups=core,resources=secrets,verbs=get` marker | P1 | Added marker to the kubebuilder comment block. `make manifests` regenerates `config/rbac/role.yaml`. | `runner_controller.go:49` |
+| **Gap 3: No active runner count** — `RunnerPhaseRunning` and `RunnerPhasePending` not tracked | P1 | Added `RunnerActiveCount` gauge (`runner_active_count`, labels: namespace+phase). Incremented on Pending/Running entry, decremented on terminal transitions. Wired through `updateStatusFromJob` and initial reconcile path. | `metrics.go:44-51`, `runner_controller.go:101`, `runner_controller.go:300-306` |
+| **Gap 4: Validation ignores `stringData`** — `checkSecretHasKeys` only checked `secret.Data` | P2 | Added `secret.StringData` check alongside `secret.Data`. Keys present in either map satisfy validation. | `runner_controller.go:361-368` |
+| **Gap 5: No retry for transient secret lookup** — validation errors requeued indefinitely | P2 | Validation failure (`checkSecretHasKeys`) returns `ctrl.Result{}, nil` instead of `ctrl.Result{}, err`. API server errors (timeout, network) still propagate as errors → requeue with backoff. | `runner_controller.go:91-93` |
+| **Gap 6: Validation not re-run on spec drift** — spec change bypassed validation | P2 | Added `validateGitRepoSecret` call before the drift delete-recreate path. If new spec fails validation, condition is set and reconcile stops without deleting the Job. | `runner_controller.go:134-141` |
+| **Gap 7: Duration edge case (clock skew)** — negative duration observed | P3 | Added `if duration >= 0` guard before `RunnerDurationSeconds.Observe` in both Succeeded and Failed branches. | `runner_controller.go:314, 323` |
+
+### New Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| **`RunnerActiveCount` gauge** | `internal/controller/metrics.go` | Tracks Pending and Running runner count per namespace. `runner_active_count{namespace,phase}`. |
+| **`isNonTerminalPhase` helper** | `internal/controller/runner_controller.go:438` | Returns true for Pending/Running phases. Used by gauge transition logic. |
+
+### Architecture Changes
+
+- **Patch ordering** is now: validate → (fail→patch with condition→return) → patch Pending → create Job. This ensures `ValidationFailed` condition is present on the first reconcile.
+- **Validation in drift path** prevents deletion of an existing Job when the new spec references an invalid secret.
+- **Gauge lifecycle** matches runner phase: `Inc()` on Pending/Running entry, `Dec()` on terminal exit. This gives operators a real-time view of concurrent runner load.
+
+### Test Coverage Updates
+
+- **`metrics_test.go`:** 3 additions — `RunnerActiveCount` nil check in `TestMetrics_initialized`, inc in `TestMetrics_canIncrement`, describe entry in `TestMetrics_describe`. Reset list includes `RunnerActiveCount`.
+- **`runner_controller_unit_test.go`:** 1 new test — `TestCheckSecretHasKeys_stringData` verifies keys in `StringData` pass validation.
+
+### Gap Status
+
+| Gap | Previous Severity | Current Status |
+|-----|-------------------|----------------|
+| Patch-ordering race condition | P0 | ✅ Resolved Session 15 — validate before first patch |
+| Missing RBAC for secrets | P1 | ✅ Resolved Session 15 — marker added |
+| No active runner count metric | P1 | ✅ Resolved Session 15 — `RunnerActiveCount` gauge |
+| Validation ignores stringData | P2 | ✅ Resolved Session 15 — `StringData` checked |
+| No retry for transient secret error | P2 | ✅ Resolved Session 15 — validation returns nil |
+| Validation not re-run on spec drift | P2 | ✅ Resolved Session 15 — drift path validates |
+| Duration clock skew | P3 | ✅ Resolved Session 15 — `duration >= 0` guard |
+| No validation webhooks | P0 | Unchanged (deferred — needs cert-manager) |
+
+### Key Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Validation failure returns nil | Prevent infinite requeue | Spec change triggers new reconcile (generation bump) |
+| Gauge uses namespace+phase labels | Distinguish Pending vs Running | Allows Grafana panels for "runners queued" vs "runners executing" |
+| StringData check additive | No regression risk | Existing Data-only tests still pass; StringData fills gap for YAML-managed secrets |
+| Clock skew guard at observation | Minimal change | Negative durations are physically impossible; gate prevents NaN in metrics |
