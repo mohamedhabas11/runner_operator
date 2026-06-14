@@ -2,6 +2,39 @@
 
 ## Session Log
 
+### Session 14 — Vision Gaps (Remaining)
+
+**Goal:** Close the remaining gaps identified in `ledger/vision.md §4 — What's Missing`.
+
+#### P0 — Critical
+
+- [ ] **Add namespace validation webhook** — Scaffold via `kubebuilder create webhook --group runners --version v1alpha1 --kind EventTrigger --programmatic-validation`. Validate: `Webhook.Path` uniqueness, `WorkflowTemplate.Name` non-empty, `AllowedNamespaces` entries valid DNS labels. Requires cert-manager + admission TLS. See `arch/blueprint.md` for cert-manager setup.
+
+#### P1 — Important
+
+- [ ] **Capture Pod logs in Workflow step status** — When a step Runner fails, fetch its Pod logs and store them in `WorkflowStepStatus.Message` or a new `Logs` field. Enables debugging without `kubectl logs`. Files: `internal/controller/workflow_controller.go` (reconcile logic), `api/v1alpha1/workflow_types.go` (status field).
+- [ ] **EventTrigger workflow ownership** — In `internal/webhook/events/server.go:createWorkflow`, call `controllerutil.SetControllerReference(trigger, workflow, r.Scheme)` so deleting an EventTrigger cascades to its created Workflows. Requires trigger and workflow in same namespace.
+- [ ] **Implement `gitRepo.Path`** — Field exists in `api/v1alpha1/runner_types.go:42` but `buildGitInitContainer` at `internal/controller/runner_controller.go` ignores it. After `git clone`, `cd /workspace/repo/<path>`. Same fix needed in `internal/gitops/clone.go`.
+
+#### P2 — Nice to Have
+
+- [ ] **Workflow step DAG topological sort** — Process steps in dependency order (`dependsOn`) instead of slice order. Add `topologicalSort(steps)` before the reconcile loop in `workflow_controller.go`. Steps with no deps can run in parallel; cycles caught by existing `cycleDetector`.
+- [ ] **Prometheus metrics** — Add `controller_runtime_metrics` for: reconciliation count, duration, error rate, job completion rate, workflow phase transitions. Use `metrics.Registry` from `controller-runtime`. File: `internal/controller/` (both controllers).
+- [ ] **Namespace quotas** — Add `MaxConcurrentWorkflows` field to `WorkflowSpec` or controller config. Track active workflows per namespace and reject new ones when quota exceeded.
+- [ ] **Cross-namespace template workflow decision** — Decide: create workflow in template namespace (for reuse) or trigger namespace (for isolation). Document in `arch/blueprint.md`. Update `internal/webhook/events/server.go:299` if needed.
+- [ ] **SharedVolume PVC cross-namespace docs** — Document that PVC references are namespace-scoped. Add note to `arch/blueprint.md` and relevant CRD descriptions.
+- [ ] **Expose `--webhook-event-port` flag docs** — Already configurable via flag in `cmd/main.go:67`. Add to `config/manager/manager.yaml` and document in `README.md`.
+- [ ] **Improve Conditions** — Add descriptive `Reason` and `Message` to all `metav1.Condition` status updates. Currently some conditions set Reason/Message to empty strings.
+
+#### Chores
+
+- [ ] **Add CI check for README examples** — Use `kubeconform` or `kubectl apply --dry-run=client` to catch drift between CRD schemas and README examples.
+- [ ] **Add markdownlint/vale CI check** — For documentation consistency across `.md` files.
+- [ ] **Dependabot config** — Add `.github/dependabot.yml` for GitHub Actions version updates.
+- [ ] **Network isolation docs** — Add namespace isolation network policy examples to `config/` for multi-tenant deployments.
+
+---
+
 ### Session 13 — GitOps Factory & Workflow Deduplication
 
 **Work Done:**
@@ -213,42 +246,9 @@
 **E2E compilation:** `go vet -tags=e2e ./test/e2e/` — OK
 **Lint:** `make lint-fix` — 0 issues
 
-## Current Session — Bug Fixes & Push
+## Open Tasks
 
-*(session complete — pushed to main)*
-
-## Deferred / Skipped
-
-### Session 11 P0
-
-- [ ] **Add namespace validation webhook** — Requires cert-manager + admission webhook TLS + kubebuilder scaffold. Separate session.
-
-### Session 11 P1
-
-- [ ] **EventTrigger workflow ownership** — `controllerutil.SetControllerReference` for webhook-created workflows
-- [ ] **Cross-namespace template workflow** — Decide template vs trigger namespace for workflow creation
-- [ ] **SharedVolume PVC cross-namespace** — Document PVC scope limitations
-- [ ] **Webhook server RBAC** — Done (namespace read permission added)
-
-### Session 11 P2
-
-- [ ] **Namespace quotas** — Integrate with ResourceQuota
-- [ ] **Tenant-aware metrics** — Add `namespace` label
-- [ ] **Network isolation** — Namespace network policies
-- [ ] **Audit logging** — Log cross-namespace operations with tenant identity
-
-### Session 10 P2 — Not Done
-
-- [ ] **Add CI check for README examples** — Use `kubeconform` or `kubectl apply --dry-run=client`
-- [ ] **Add markdownlint/vale check** — For documentation consistency
-
-### Other
-
-- [ ] **Improve Conditions** — Add Reason/Message to status conditions for better observability
-- [ ] **Topological sort of steps** — Process steps in dependency order, not slice order
-- [ ] **`gitRepo.Path` implementation** — Currently defined in `runner_types.go` but ignored in `buildGitInitContainer`
-- [ ] **Expose `--webhook-event-port`** — Currently hardcoded 8080 in `cmd/main.go`
-- [ ] **Dependabot config** — GitHub Actions version updates
+All open tasks are tracked in **Session 14** above, organized by priority (P0–P2 + Chores). Items from previous sessions' deferred/skipped sections have been migrated there.
 
 ---
 
