@@ -6,4 +6,19 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: eventtrigger-sample
 spec:
-  # TODO(user): Add fields here
+  webhook:
+    path: /webhooks/example
+    secretRef:
+      name: webhook-hmac-secret
+  workflowTemplate:
+    name: workflow-sample
+  parameters:
+    - name: BRANCH_REF
+      source: "$.ref"
+      required: true
+    - name: REPO_NAME
+      source: "$.repository.full_name"
+      default: "unknown"
+  rateLimit:
+    maxPerMinute: 10
+    maxConcurrent: 5
