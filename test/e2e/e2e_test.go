@@ -274,7 +274,7 @@ var _ = Describe("Manager", Ordered, func() {
 
 		AfterAll(func() {
 			By("deleting the Runner resource")
-			cmd := exec.Command("kubectl", "delete", "runner", runnerName, "-n", testNamespace, "--ignore-not-found")
+			cmd := exec.Command("kubectl", "delete", "runner", runnerName, "--wait=false", "-n", testNamespace, "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 
 			By("deleting the associated Job")
@@ -351,7 +351,7 @@ spec:
 
 		AfterAll(func() {
 			By("deleting the Runner resource")
-			cmd := exec.Command("kubectl", "delete", "runner", runnerName, "-n", testNamespace, "--ignore-not-found")
+			cmd := exec.Command("kubectl", "delete", "runner", runnerName, "--wait=false", "-n", testNamespace, "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 
 			By("deleting the associated Job")
@@ -415,7 +415,7 @@ spec:
 
 		AfterAll(func() {
 			By("deleting the Runner resource")
-			cmd := exec.Command("kubectl", "delete", "runner", runnerName, "-n", testNamespace, "--ignore-not-found")
+			cmd := exec.Command("kubectl", "delete", "runner", runnerName, "--wait=false", "-n", testNamespace, "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 
 			By("deleting the associated Job")
@@ -469,7 +469,7 @@ spec:
 
 		AfterAll(func() {
 			By("deleting the Runner resource")
-			cmd := exec.Command("kubectl", "delete", "runner", runnerName, "-n", testNamespace, "--ignore-not-found")
+			cmd := exec.Command("kubectl", "delete", "runner", runnerName, "--wait=false", "-n", testNamespace, "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 
 			By("deleting the associated Job")
@@ -568,7 +568,7 @@ spec:
 
 			By("deleting any Runner resources created by the Workflow")
 			cmd = exec.Command("kubectl", "delete", "runner", "-l",
-				"runner-operator.io/workflow="+workflowName, "-n", testNamespace, "--ignore-not-found")
+				"runner-operator.io/workflow="+workflowName, "--wait=false", "-n", testNamespace, "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 		})
 
@@ -676,7 +676,7 @@ spec:
 
 			By("deleting any Runner resources created by the Workflow")
 			cmd = exec.Command("kubectl", "delete", "runner", "-l",
-				"runner-operator.io/workflow="+wfName, "-n", testNamespace, "--ignore-not-found")
+				"runner-operator.io/workflow="+wfName, "--wait=false", "-n", testNamespace, "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 		})
 
@@ -734,12 +734,12 @@ spec:
 			_, _ = utils.Run(cmd)
 
 			By("deleting the Runner template")
-			cmd = exec.Command("kubectl", "delete", "runner", templateName, "-n", templateNamespace, "--ignore-not-found")
+			cmd = exec.Command("kubectl", "delete", "runner", templateName, "--wait=false", "-n", templateNamespace, "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 
 			By("deleting any Runner resources created by the Workflow")
 			cmd = exec.Command("kubectl", "delete", "runner", "-l",
-				"runner-operator.io/workflow="+wfName, "-n", testNamespace, "--ignore-not-found")
+				"runner-operator.io/workflow="+wfName, "--wait=false", "-n", testNamespace, "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 		})
 
@@ -873,7 +873,7 @@ spec:
 
 			By("deleting any Runner resources created by the Workflow")
 			cmd = exec.Command("kubectl", "delete", "runner", "-l",
-				"runner-operator.io/workflow="+wfName, "-n", testNamespace, "--ignore-not-found")
+				"runner-operator.io/workflow="+wfName, "--wait=false", "-n", testNamespace, "--ignore-not-found")
 			_, _ = utils.Run(cmd)
 		})
 

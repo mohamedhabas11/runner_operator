@@ -13,11 +13,11 @@ Store the deferred intended spec hash in a separate `Status.DesiredSpecHash` fie
 
 **Files:** `api/v1alpha1/runner_types.go`, `internal/controller/runner_controller.go`
 
-- [ ] Add `DesiredSpecHash string` to `RunnerStatus`
-- [ ] Set it on drift defer instead of only patching condition
-- [ ] On restart, read `Status.DesiredSpecHash` and compare to current spec
-- [ ] Run `make manifests generate`
-- [ ] Unit test: simulate restart mid-defer → drift re-detected
+- [x] Add `DesiredSpecHash string` to `RunnerStatus`
+- [x] Set it on drift defer instead of only patching condition
+- [x] On restart, read `Status.DesiredSpecHash` and compare to current spec
+- [x] Run `make manifests generate`
+- [x] Unit test: simulate restart mid-defer → drift re-detected
 - [ ] E2E test: spec change while job running → deferred → restart → replace on complete
 
 ### I-2: Add CRD validation markers
@@ -27,12 +27,12 @@ Add `+kubebuilder:validation:Required`, `MinLength`, `Enum`, `Pattern` markers t
 
 **Files:** `api/v1alpha1/*_types.go`
 
-- [ ] `RunnerSpec.Image`: `+kubebuilder:validation:Required`, `MinLength=1`
-- [ ] `RunnerSpec.GitRepo.URL`: `+kubebuilder:validation:Pattern` for URL format
-- [ ] `RunnerPhase` / `WorkflowPhase`: `+kubebuilder:validation:Enum`
-- [ ] `EventTriggerSpec.Webhook.Path`: `+kubebuilder:validation:MinLength=1`, `Pattern`
-- [ ] `RunnerSpec.TimeoutAfter`: `+kubebuilder:validation:Minimum=1`
-- [ ] Run `make manifests` and verify CRD YAML contains corresponding `x-kubernetes-validations` / OpenAPI constraints
+- [x] `RunnerSpec.Image`: `+kubebuilder:validation:Required`, `MinLength=1`
+- [x] `RunnerSpec.GitRepo.URL`: `+kubebuilder:validation:Pattern` for URL format
+- [x] `RunnerPhase` / `WorkflowPhase`: `+kubebuilder:validation:Enum`
+- [x] `EventTriggerSpec.Webhook.Path`: `+kubebuilder:validation:MinLength=1`, `Pattern`
+- [x] `RunnerSpec.TimeoutAfter`: `+kubebuilder:validation:Minimum=1`
+- [x] Run `make manifests` and verify CRD YAML contains corresponding `x-kubernetes-validations` / OpenAPI constraints
 
 ### I-3: Enable leader election by default
 **Severity:** Medium | **Effort:** 15m | **Source:** Finding 11
@@ -41,7 +41,7 @@ Change `cmd/main.go:71` default from `false` to `true`. Users who want single-re
 
 **File:** `cmd/main.go`
 
-- [ ] Change `flag.BoolVar(&enableLeaderElection, "leader-elect", false, ...)` to `true`
+- [x] Change `flag.BoolVar(&enableLeaderElection, "leader-elect", false, ...)` to `true`
 - [ ] Update Helm chart values to match default
 - [ ] Document in README upgrade note
 
@@ -70,9 +70,9 @@ Prevent silent mid-execution deletion of Runner (and its Job). On deletion: log 
 
 **Files:** `internal/controller/runner_controller.go`, `api/v1alpha1/runner_types.go`
 
-- [ ] Add `runner-operator.io/cleanup` finalizer constant
-- [ ] Add finalizer in `Reconcile` on create
-- [ ] Handle deletion: wait for Job completion, emit event, remove finalizer
+- [x] Add `runner-operator.io/cleanup` finalizer constant
+- [x] Add finalizer in `Reconcile` on create
+- [x] Handle deletion: wait for Job completion, emit event, remove finalizer
 - [ ] Unit test: deletion during Running phase → finalizer blocks, Job continues
 - [ ] E2E test: delete Runner mid-execution → Runner persists until Job completes
 
@@ -83,10 +83,10 @@ Current integration tests are smoke-only (create CR, call Reconcile once, assert
 
 **Files:** `internal/controller/*_test.go`
 
-- [ ] Runner: verify Job created with correct spec, phase transitions, spec drift replaces Job, validation failure persists condition
-- [ ] Workflow: 3-step DAG → all Runners complete → workflow Succeeded, `dependsOn` ordering verified, `when=on_failure` skip verified
+- [x] Runner: verify Job created with correct spec, phase transitions, spec drift replaces Job, validation failure persists condition
+- [x] Workflow: 3-step DAG → all Runners complete → workflow Succeeded, `dependsOn` ordering verified, `when=on_failure` skip verified
 - [ ] EventTrigger: registration successful, path collision sets condition
-- [ ] Refactor test helpers for shared setup/teardown
+- [x] Refactor test helpers for shared setup/teardown
 
 ### ST-4: Add Secret watch to EventTrigger controller
 **Severity:** Medium | **Effort:** 2h | **Source:** Finding 6
@@ -95,8 +95,8 @@ Add `Watches()` on Secrets with an event mapper that maps secret changes to the 
 
 **Files:** `internal/controller/eventtrigger_controller.go`
 
-- [ ] Implement `mapSecretToTriggers` event mapper
-- [ ] Add `Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(mapper))` in `SetupWithManager`
+- [x] Implement `mapSecretToTriggers` event mapper
+- [x] Add `Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(mapper))` in `SetupWithManager`
 - [ ] Unit test: secret update → trigger reconcile queued
 - [ ] E2E test: rotate HMAC secret → webhook still accepts new signature
 
@@ -107,8 +107,8 @@ Instead of injecting only into `Steps[0].Env` or `Jobs[0].Steps[0].Env`, inject 
 
 **Files:** `internal/webhook/events/server.go`, `api/v1alpha1/workflow_types.go`
 
-- [ ] Add `workflow.spec.env` field or inject parameters into all steps
-- [ ] Update `server.go` parameter injection logic
+- [x] Inject parameters into all steps (not just first)
+- [x] Update `server.go` parameter injection logic
 - [ ] Update webhook tests
 - [ ] E2E test: 3-step workflow → parameters available in step 2 and 3
 
