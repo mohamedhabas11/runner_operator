@@ -6,8 +6,8 @@ description: |
   DAG-based Workflows.
 type: application
 
-version: 0.2.0
-appVersion: "0.1.0"
+version: 0.3.2
+appVersion: "0.3.2"
 
 home: https://github.com/mohamedhabas11/runner_operator
 sources:
