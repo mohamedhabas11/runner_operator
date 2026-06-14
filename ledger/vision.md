@@ -239,4 +239,79 @@ When working on this project:
 
 ---
 
-*Last updated: Session 12 — Cross-Namespace Fixes*
+*Last updated: Session 13 — GitOps Factory & Workflow Deduplication*
+
+---
+
+## 10. Session 13 — GitOps Factory & Workflow Deduplication
+
+### Architecture Changes
+
+**New package: `internal/gitops/`** (factory pattern)
+
+```
+NewAuthStrategy(gitRepo) → AuthStrategy interface
+    ├─ noAuthStrategy    (public repos)
+    ├─ sshAuthStrategy   (SSH keys)
+    └─ httpAuthStrategy  (token / basicAuth)
+```
+
+Public builders: `BuildInitContainer`, `BuildVolumes`, `BuildCloneScript`. Extracted from `runner_controller.go:buildGitInitContainer` and `workflow_controller.go:cloneGitRepo`. Deduplicates ~80 LOC of inline container/volume logic shared by both controllers.
+
+**Workflow controller refactoring** (generics + strategy pattern):
+
+| Pattern | Before | After | Overlap |
+|---------|--------|-------|---------|
+| Step reconciliation | `reconcileSteps` + `replicateJobSteps` (copy-paste) | `reconcileStepLoop` + `buildRunner` closure | ~85% |
+| Cycle detection | `detectCycle` + `detectJobCycle` (copy-paste) | `cycleDetector[T any]` | ~95% |
+| Phase computation | `computeFlatWorkflowPhase` + `computeJobWorkflowPhase` (copy-paste) | `computeWorkflowPhase[T any]` | ~90% |
+
+**API type changes:**
+
+- `GitAuthType` enum (`none`, `ssh`, `http`) for declarative auth selection
+- `GitRepo.Image` field for custom init container images
+- `SecretRef` changed from `*corev1.LocalObjectReference` to `corev1.LocalObjectReference` (value type — no longer optional pointer)
+
+### Updated Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      Kubernetes Cluster                          │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                 Manager (single binary)                    │   │
+│  │                                                            │   │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │   │
+│  │  │ Runner   │  │ Workflow │  │ Event    │  │ Webhook  │  │   │
+│  │  │ Ctrl     │  │ Ctrl     │  │ Trigger  │  │ Server   │  │   │
+│  │  └────┬─────┘  └────┬─────┘  │ Ctrl     │  │ :8080    │  │   │
+│  │       │              │        └────┬─────┘  └──────────┘  │   │
+│  │       │              │             │                       │   │
+│  │       │     ┌────────┴────────┐    │                       │   │
+│  │       │     │ gitops factory  │    │                       │   │
+│  │       │     │ (shared)        │    │                       │   │
+│  │       │     └─────────────────┘    │                       │   │
+│  └───────┼──────────────┼─────────────┼──────────────────────┘   │
+│          │              │             │                           │
+│          ▼              ▼             ▼                           │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐                       │
+│  │ batch/   │  │ Runner   │  │ Workflow │                       │
+│  │ v1.Job   │  │ CR       │  │ CR       │                       │
+│  └──────────┘  └──────────┘  └──────────┘                       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Gap Status Update
+
+| Gap (from §4) | Previous Severity | Current Status |
+|----------------|-------------------|----------------|
+| No validation webhooks | P0 | Unchanged (deferred — needs cert-manager) |
+| `RunnerRef` namespace-locked | P0 | ✅ Resolved Session 12 |
+| `AllowedNamespaces` dead code | P0 | ✅ Resolved Session 12 |
+| No error message capture | P1 | Unchanged |
+| EventTrigger workflows have no owner | P1 | Unchanged |
+| No Prometheus metrics | P2 | Unchanged |
+| No namespace quotas | P2 | Unchanged |
+| No workflow step DAG topological sort | P2 | Unchanged |
+| Runner/Workflow git init logic duplication | P1 | ✅ Resolved — `internal/gitops/` factory pattern |
+| Step reconciliation copy-paste | P1 | ✅ Resolved — `reconcileStepLoop` + closure strategy |

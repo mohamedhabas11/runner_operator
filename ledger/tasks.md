@@ -2,6 +2,38 @@
 
 ## Session Log
 
+### Session 13 — GitOps Factory & Workflow Deduplication
+
+**Work Done:**
+- **`internal/gitops/` factory package** — `NewAuthStrategy(gitRepo)` returns `AuthStrategy` interface with `BuildInitContainer`, `BuildVolumes`, `BuildCloneScript`. Three strategies: `noAuthStrategy` (public), `sshAuthStrategy` (SSH keys), `httpAuthStrategy` (token/basic auth). Replaces inline git init logic duplicated in `runner_controller.go` and `workflow_controller.go`. **98.8% test coverage** via 25 unit tests.
+- **`reconcileStepLoop` extraction** — Unified `reconcileSteps` + `reconcileJobSteps` (~85% overlap) into single function driven by `buildRunner func(step) *Runner` closure.
+- **`cycleDetector[T any]`** — Generic 3-color DFS replaces `detectCycle` + `detectJobCycle` (~95% overlap). Type-safe via generics.
+- **`computeWorkflowPhase[T any]`** — Generic phase aggregation replaces `computeFlatWorkflowPhase` + `computeJobWorkflowPhase` (~90% overlap).
+- **API type changes:** Added `GitAuthType` enum, `GitRepo.Image` field, changed `SecretRef` to value type. Ran `make generate` for deepcopy regeneration.
+- **Inline WHAT/WHY docs** — Added engineer-facing documentation to all refactored code blocks.
+- **`make test`** — all passing. **`make test-e2e`** — 11/11 specs passing (173s on isolated Kind cluster `runner-operator-test-e2e`).
+
+**Files modified:**
+- `internal/gitops/` (new) — 7 files: `git.go`, `git_test.go`, `auth.go`, `auth_test.go`, `clone.go`, `clone_test.go`, `initcontainer.go`
+- `internal/controller/runner_controller.go` — git init replaced with gitops factory calls
+- `internal/controller/workflow_controller.go` — `reconcileStepLoop`, `cycleDetector[T]`, `computeWorkflowPhase[T]`, git init replaced with factory calls
+- `api/v1alpha1/runner_types.go` — `GitAuthType`, `GitRepo.Image`, `SecretRef` value type
+- `api/v1alpha1/zz_generated.deepcopy.go` — regenerated
+
+**Verification:**
+- `make test` — 25 new unit tests, all passing
+- `make lint-fix` — 0 issues
+- `go build ./...` — OK
+- `make test-e2e` — 11/11 specs passing
+
+**Key Decisions:**
+- `AuthStrategy` as interface (not func pointer) — allows multiple builders per strategy, extensible for future auth methods
+- Generics for `cycleDetector[T]` and `computeWorkflowPhase[T]` — type safety without interface{} cast, zero runtime overhead
+- Timeout handlers NOT extracted — genuinely different logic (nested vs flat loops); extraction would add indirection without real savings
+- `SecretRef` value type — needed for GitAuth factory; `make generate` regenerated deepcopy
+
+---
+
 ### Session 12 — Cross-Namespace Fixes & Release Workflow Hardening
 
 **Work Done:**

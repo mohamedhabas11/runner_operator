@@ -1,170 +1,61 @@
 # Builder Agent Prompt — runner-operator
 
-You are a Go/Kubernetes builder agent working on the `runner-operator` project. Your job is to implement P0 correctness fixes for cross-namespace multi-tenancy.
+You are a Go/Kubernetes builder agent working on the `runner-operator` project. Your job is to implement refactoring and feature work following the project's factory patterns and generic conventions.
 
 ## Context
 
-runner-operator is a Kubernetes operator that runs arbitrary workloads as managed Jobs. It has three CRDs: Runner (single job), Workflow (DAG of jobs), and EventTrigger (webhook → workflow). The operator is deployed once and must serve all teams across all namespaces.
+runner-operator is a Kubernetes operator that runs arbitrary workloads as managed Jobs. Three CRDs: Runner (single job), Workflow (DAG of steps/jobs), EventTrigger (webhook → workflow). Single deployment serves all namespaces.
 
 **Read these files first:**
-- `ledger/vision.md` — project vision, principles, architecture
-- `ledger/tasks.md` — full task list with Session 11 P0 tasks
+- `ledger/vision.md` — project vision, principles, current state
+- `ledger/tasks.md` — full session ledger
 - `arch/blueprint.md` — architecture decisions and diagrams
 - `AGENTS.md` — kubebuilder conventions and coding rules
 
-## Your Tasks (Session 11 — P0)
+## Codebase Patterns (Refactored)
 
-### Task 1: RunnerRef Cross-Namespace Support
-
-**Goal**: Allow workflow steps to reference Runner templates in other namespaces.
-
-**Current state** (`api/v1alpha1/workflow_types.go:62`):
-```go
-RunnerRef *corev1.LocalObjectReference `json:"runnerRef,omitempty"`
+### Factory Pattern (gitops)
 ```
-
-**Target state**: Custom type with Name+Namespace:
-```go
-type RunnerRef struct {
-    Name      string `json:"name"`
-    Namespace string `json:"namespace,omitempty"` // defaults to workflow's namespace
-}
+NewAuthStrategy(gitRepo) → AuthStrategy interface
+    ├─ noAuthStrategy    (public repos)
+    ├─ sshAuthStrategy   (SSH keys)
+    └─ httpAuthStrategy  (token / basicAuth)
 ```
+Public builders: `BuildInitContainer(repo, strategy)`, `BuildVolumes(repo, strategy)`, `BuildCloneScript(repo, strategy)`. Package: `internal/gitops/`.
 
-**Files to modify:**
-1. `api/v1alpha1/workflow_types.go` — Add `RunnerRef` type, update `WorkflowStep.RunnerRef` field
-2. `internal/controller/workflow_controller.go:359` — Update `buildStepRunner` to resolve cross-namespace:
-   ```go
-   ns := wf.Namespace
-   if step.RunnerRef != nil && step.RunnerRef.Namespace != "" {
-       ns = step.RunnerRef.Namespace
-   }
-   if err = r.Get(ctx, types.NamespacedName{Name: step.RunnerRef.Name, Namespace: ns}, template); err == nil {
-       // ...
-   }
-   ```
-3. `internal/controller/workflow_controller.go:377` — Update error message to show resolved namespace
-4. Run `make manifests generate` to regenerate CRDs
-5. Run `make test` and `make lint-fix` to verify
+### Generic Pattern (workflow controller)
+- `reconcileStepLoop(steps, stepRunners, buildRunner, jobName)` — shared engine for flat + job step reconciliation. Strategy via `buildRunner func`.
+- `cycleDetector[T](items, name, deps, kind)` — generic 3-color DFS. Wrappers: `detectCycle`, `detectJobCycle`.
+- `computeWorkflowPhase[T](specNames, statuses, findStatus, isActive, isFailed)` — generic phase aggregation.
 
-**Constraints:**
-- Backward compatible: if `Namespace` is empty, default to workflow's namespace
-- Follow existing code style (no comments unless asked)
-- Never delete `// +kubebuilder:scaffold:*` markers
-- Use `client.MergeFrom` for status patches
-
-### Task 2: Enforce AllowedNamespaces
-
-**Goal**: EventTrigger can only create workflows in allowed namespaces.
-
-**Current state** (`api/v1alpha1/eventtrigger_types.go:92`):
-```go
-AllowedNamespaces []string `json:"allowedNamespaces,omitempty"`
-```
-Field exists but is never enforced.
-
-**Files to modify:**
-1. `internal/webhook/events/server.go:282` — In `createWorkflow`, add check:
-   ```go
-   if len(trigger.Spec.AllowedNamespaces) > 0 {
-       allowed := false
-       for _, ns := range trigger.Spec.AllowedNamespaces {
-           if ns == trigger.Namespace {
-               allowed = true
-               break
-           }
-       }
-       if !allowed {
-           return fmt.Errorf("trigger namespace %s not in allowed namespaces", trigger.Namespace)
-       }
-   }
-   ```
-2. `internal/controller/eventtrigger_controller.go:49` — In `Reconcile`, add same check and set status condition
-3. Add RBAC marker for namespace read: `// +kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;list;watch`
-4. Run `make manifests generate`, `make test`, `make lint-fix`
-
-### Task 3: Namespace Validation Webhook
-
-**Goal**: Validate EventTrigger CRs at admission time.
-
-**Approach**: Use kubebuilder's `--programmatic-validation` scaffold.
-
-**Steps:**
-1. Run: `kubebuilder create webhook --group runners --version v1alpha1 --kind EventTrigger --programmatic-validation`
-2. In the generated webhook, add validation:
-   - `Webhook.Path` must be unique (check via list)
-   - `WorkflowTemplate.Name` must be non-empty
-   - `AllowedNamespaces` entries must be valid DNS labels
-3. Run `make manifests generate`, `make test`, `make lint-fix`
+### Step Runner Builder
+- `buildStepRunner(ctx, wf, step)` — fallback chain: `step.Image` → `step.RunnerRef` (template copy with overrides) → `busybox:latest`
+- `buildJobStepRunner(ctx, wf, job, step)` — decorator: calls `buildStepRunner` then adds job labels, env, shared volumes, job-level gitRepo
 
 ## Project Conventions
 
-- **Tests**: Ginkgo + Gomega BDD style. Check `suite_test.go` for setup.
+- **Tests**: Ginkgo + Gomega BDD. Standard Go tests for pure functions. Check `suite_test.go` for envtest setup.
 - **Status updates**: Always `client.MergeFrom` + `Status().Patch`
-- **Logging**: `log.FromContext(ctx)` with key-value pairs
+- **Logging**: `log.FromContext(ctx)` with key-value pairs. Messages start capital, no period.
 - **RBAC**: Markers in controller files, regenerated by `make manifests`
 - **CRD changes**: Always run `make manifests generate` after modifying `*_types.go`
-- **Lint**: Run `make lint-fix` after changes
+- **Lint**: `make lint-fix`
+- **Tests**: `make test` (unit), `make test-e2e` (isolated Kind cluster)
+- **Inline docs**: WHAT/WHY on every major code block. Engineer-focused, no fluff.
 
 ## Verification
 
-After each task:
 ```bash
 make manifests generate  # if CRD types changed
 make test                # unit tests pass
 make lint-fix            # 0 issues
 go build ./...           # compiles
+make test-e2e            # 11/11 specs on isolated Kind
 ```
 
 ## What NOT to Do
 
-- Never edit `config/crd/bases/*.yaml` directly
-- Never edit `config/rbac/role.yaml` directly  
+- Never edit auto-generated files: `config/crd/bases/*.yaml`, `config/rbac/role.yaml`, `**/zz_generated.*.go`, `PROJECT`
 - Never delete `// +kubebuilder:scaffold:*` markers
-- Never add comments unless explicitly asked
 - Never assume libraries exist — check go.mod first
 - Never commit secrets or keys
-
-## Design Decisions (Signed Off)
-
-| Question | Answer | Rationale |
-|----------|--------|-----------|
-| Validation webhook | **Defer to separate session** | Requires cert-manager + admission TLS scaffold. Not blocking correctness. |
-| EventTrigger workflow namespace | **Trigger namespace (isolation)** | Workflows live where the trigger lives. Template is read-only reference. Prevents cross-tenant pollution. |
-| `gitRepo.Path` implementation | **Fix now** | Already defined in `runner_types.go:42` but ignored in `buildGitInitContainer`. One-line fix. |
-| `--webhook-event-port` flag | **Fix now** | Currently hardcoded 8080 in `cmd/main.go:67`. Should be configurable. |
-
-## Session 13 Tasks
-
-### Task 1: Fix `gitRepo.Path` (P1)
-
-**Current state**: `GitRepo.Path` is defined in `api/v1alpha1/runner_types.go:42` but `buildGitInitContainer` at `internal/controller/runner_controller.go:218` ignores it.
-
-**Fix**: In `runner_controller.go:268`, change:
-```go
-script += "git clone --depth 1 -- " + cloneURL + " /workspace/repo"
-```
-To:
-```go
-script += "git clone --depth 1 -- " + cloneURL + " /workspace/repo"
-if gitRepo.Path != "" {
-    script += " && cd /workspace/repo/" + gitRepo.Path
-}
-```
-
-### Task 2: Expose `--webhook-event-port` Flag (P2)
-
-**Current state**: Port is hardcoded in `cmd/main.go:67`:
-```go
-flag.StringVar(&webhookEventAddr, "webhook-event-addr", ":8080", "...")
-```
-
-**Fix**: Already configurable via flag. Just document in README that `--webhook-event-addr` can be changed.
-
-## Output
-
-When done, provide:
-1. List of files modified
-2. Test results
-3. Any design decisions made
-4. Questions or blockers encountered
