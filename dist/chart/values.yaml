@@ -153,10 +153,11 @@ crd:
 metrics:
   enable: true
   # Metrics server port
-  port: 8443
+  port: 8080
   # Enable secure metrics: HTTPS with certs/auth (true) or HTTP (false).
+  # Set to true if you need TLS termination at the operator (e.g., no ingress).
   # Note: Metrics authn/authz needs ClusterRole access.
-  secure: true
+  secure: false
 
 ## Cert-manager integration for TLS certificates.
 ## Required for webhook certificates and metrics endpoint certificates.

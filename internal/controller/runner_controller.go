@@ -282,11 +282,21 @@ func (r *RunnerReconciler) updateStatusFromJob(ctx context.Context, runner *runn
 	case runnersv1alpha1.RunnerPhaseSucceeded:
 		setRunnerCondition(runner, metav1.ConditionTrue, ReasonRunnerSucceeded, "Runner completed successfully")
 		RunnerJobCompletedTotal.WithLabelValues(runner.Namespace, "succeeded").Inc()
+		if runner.Status.StartTime != nil && runner.Status.CompletionTime != nil {
+			duration := runner.Status.CompletionTime.Sub(runner.Status.StartTime.Time).Seconds()
+			RunnerDurationSeconds.WithLabelValues(runner.Namespace).Observe(duration)
+		}
 	case runnersv1alpha1.RunnerPhaseFailed:
 		setRunnerCondition(runner, metav1.ConditionFalse, ReasonRunnerFailed, "Runner failed")
 		RunnerJobCompletedTotal.WithLabelValues(runner.Namespace, "failed").Inc()
+		if runner.Status.StartTime != nil && runner.Status.CompletionTime != nil {
+			duration := runner.Status.CompletionTime.Sub(runner.Status.StartTime.Time).Seconds()
+			RunnerDurationSeconds.WithLabelValues(runner.Namespace).Observe(duration)
+		}
 	case runnersv1alpha1.RunnerPhaseRunning:
 		setRunnerCondition(runner, metav1.ConditionFalse, ReasonRunnerRunning, "Runner is running")
+	case runnersv1alpha1.RunnerPhaseUnknown:
+		RunnerJobCompletedTotal.WithLabelValues(runner.Namespace, "unknown").Inc()
 	}
 	logger.Info("Runner phase changed", "phase", phase)
 

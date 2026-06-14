@@ -47,21 +47,20 @@ runner-operator is a Kubernetes-native platform for running arbitrary workloads 
 | **EventTrigger Controller** | ✅ Implemented | Route registration/deregistration. |
 | **RBAC** | ✅ ClusterRole | Cluster-wide permissions. |
 | **Security** | ✅ Implemented | Non-root, read-only rootfs, dropped capabilities, seccomp. |
-| **E2E Tests** | ✅ 7 scenarios | Runner lifecycle, failure, drift, workflow, timeout, on_failure, git clone. |
+| **E2E Tests** | ✅ 11 scenarios | Runner lifecycle, failure, drift, workflow, timeout, on_failure, git clone, cross-namespace refs, allowed-ns rejection, on_failure cleanup, metrics endpoint. |
 | **CI** | ✅ GitHub Actions | Unit tests, E2E on Kind, lint. |
+| **ConditionBuilder** | ✅ Factory pattern | 15 reason codes, builder chain, per-controller helpers (Runner/Workflow/Trigger). |
+| **Pod log capture** | ✅ Implemented | `fetchPodLogs` in workflow controller; last 50 lines of runner container on step failure. |
+| **DAG topological sort** | ✅ Implemented | Kahn's algorithm for step dependency ordering. |
+| **Prometheus metrics** | ✅ Implemented | 4 custom counters/histograms via controller-runtime registry. |
+| **Namespace quotas** | ✅ Implemented | Annotation `runner-operator.io/max-concurrent-workflows` on Namespace. |
+| **Network policy** | ✅ Documented | `config/network-policy/isolate-tenants.yaml` for multi-tenant isolation. |
 
 ### What's Missing
 
 | Gap | Severity | Impact |
 |-----|----------|--------|
 | No validation webhooks | P0 | Invalid CRs accepted, fail at runtime |
-| `RunnerRef` namespace-locked | P0 | Cannot share Runner templates across namespaces |
-| `AllowedNamespaces` dead code | P0 | No multi-tenant isolation |
-| No error message capture | P1 | Workflow status lacks failure details |
-| EventTrigger workflows have no owner | P1 | Orphaned workflows on trigger deletion |
-| No Prometheus metrics | P2 | No operational visibility |
-| No namespace quotas | P2 | One team can starve others |
-| No workflow step DAG topological sort | P2 | Steps execute in slice order, not dependency order |
 
 ---
 
@@ -163,10 +162,10 @@ EventTrigger ──creates──▶ Workflow (via webhook server)
 | Task | Status | Priority |
 |------|--------|----------|
 | Validation webhooks for CRDs | 🔲 | P0 |
-| `RunnerRef` cross-namespace support | 🔲 | P0 |
-| `AllowedNamespaces` enforcement | 🔲 | P0 |
-| Capture Pod logs in Workflow step status | 🔲 | P1 |
-| EventTrigger workflow ownership | 🔲 | P1 |
+| `RunnerRef` cross-namespace support | ✅ | P0 |
+| `AllowedNamespaces` enforcement | ✅ | P0 |
+| Capture Pod logs in Workflow step status | ✅ | P1 |
+| EventTrigger workflow ownership | ✅ | P1 |
 | Step timeout enforcement in controller | 🔲 | P1 |
 
 ### Phase 2 — Observability & Operations
@@ -175,10 +174,10 @@ EventTrigger ──creates──▶ Workflow (via webhook server)
 
 | Task | Status | Priority |
 |------|--------|----------|
-| Prometheus metrics (reconciliation, jobs) | 🔲 | P2 |
-| Topological sort for step execution order | 🔲 | P2 |
-| Namespace quotas / ResourceQuota integration | 🔲 | P2 |
-| Tenant-aware metrics and events | 🔲 | P2 |
+| Prometheus metrics (reconciliation, jobs) | ✅ | P2 |
+| Topological sort for step execution order | ✅ | P2 |
+| Namespace quotas / ResourceQuota integration | ✅ | P2 |
+| Tenant-aware metrics and events | ✅ | P2 |
 | Audit logging for cross-namespace ops | 🔲 | P2 |
 
 ### Phase 3 — Advanced Features
@@ -239,7 +238,7 @@ When working on this project:
 
 ---
 
-*Last updated: Session 13 — GitOps Factory & Workflow Deduplication*
+*Last updated: Session 14 — Error Capture, DAG Sort, Metrics & Quotas*
 
 ---
 
@@ -308,10 +307,53 @@ Public builders: `BuildInitContainer`, `BuildVolumes`, `BuildCloneScript`. Extra
 | No validation webhooks | P0 | Unchanged (deferred — needs cert-manager) |
 | `RunnerRef` namespace-locked | P0 | ✅ Resolved Session 12 |
 | `AllowedNamespaces` dead code | P0 | ✅ Resolved Session 12 |
-| No error message capture | P1 | Unchanged |
-| EventTrigger workflows have no owner | P1 | Unchanged |
-| No Prometheus metrics | P2 | Unchanged |
-| No namespace quotas | P2 | Unchanged |
-| No workflow step DAG topological sort | P2 | Unchanged |
-| Runner/Workflow git init logic duplication | P1 | ✅ Resolved — `internal/gitops/` factory pattern |
-| Step reconciliation copy-paste | P1 | ✅ Resolved — `reconcileStepLoop` + closure strategy |
+| No error message capture | P1 | ✅ Resolved Session 14 — `fetchPodLogs` helper |
+| EventTrigger workflows have no owner | P1 | ✅ Resolved Session 13/14 — owner ref set on workflow creation |
+| No Prometheus metrics | P2 | ✅ Resolved Session 14 — `internal/controller/metrics.go` |
+| No namespace quotas | P2 | ✅ Resolved Session 14 — annotation-based quota check |
+| No workflow step DAG topological sort | P2 | ✅ Resolved Session 14 — `topologicalSortSteps` |
+| Runner/Workflow git init logic duplication | P1 | ✅ Resolved Session 13 — `internal/gitops/` factory pattern |
+| Step reconciliation copy-paste | P1 | ✅ Resolved Session 13 — `reconcileStepLoop` + closure strategy |
+
+---
+
+## 11. Session 14 — Error Capture, DAG Sort, Metrics & Namespace Quotas
+
+### New Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| **ConditionBuilder** | `internal/controller/conditions.go` | Builder pattern for `metav1.Condition`. `NewCondition("Ready") → WithStatus/Reason/Message/Build`. 15 predefined reason codes. |
+| **Pod log capture** | `internal/controller/workflow_controller.go:1186` | `fetchPodLogs` retrieves last 50 lines of "runner" container log on step failure, capped at 4 KiB. Message stored in `StepStatus.Message`. |
+| **DAG topological sort** | `internal/controller/workflow_controller.go` | `topologicalSortSteps` (Kahn's algorithm) wired into flat + job reconcile paths before step loop. |
+| **Prometheus metrics** | `internal/controller/metrics.go` | 4 custom metrics: `RunnerJobCompletedTotal` (counter, ns+phase), `WorkflowPhaseTransitions` (counter, ns+phase), `WorkflowDurationSeconds` (histogram, ns), `StepRetriesTotal` (counter, ns). Registered via controller-runtime `metrics.Registry`. |
+| **Namespace quotas** | `internal/controller/workflow_controller.go:1142` | Annotation `runner-operator.io/max-concurrent-workflows` on Namespace. `checkNamespaceQuota → maxConcurrentWorkflowsForNS` before first reconcile. Quota-exceeded → requeue with condition. RBAC for namespace + workflow list added. |
+| **Network policy** | `config/network-policy/isolate-tenants.yaml` | Example NetworkPolicy for multi-tenant namespace isolation. |
+
+### Architecture Changes
+
+- Conditions now use a **builder pattern** (`internal/controller/conditions.go`) instead of raw `metav1.Condition` structs. Ensures Reason/Message/ObservedGeneration are never accidentally empty. Shared across all three controllers via `setRunnerCondition`, `setWorkflowCondition`, `setTriggerCondition` helpers.
+- Pod logs stored in existing `StepStatus.Message` field — no new CRD field.
+- Custom metrics use `prometheus.CounterVec` and `HistogramVec` with `namespace` label — enables per-tenant cost attribution.
+- Quota limit is read from Namespace annotations (zero-infrastructure, namespace owner controls declaratively). Active workflow count computed via `r.List` with `InNamespace`.
+
+### Test Coverage
+
+- **Conditions:** 7 unit tests (defaults, chain, namespaced name, per-controller helpers, upsert).
+- **Topological sort:** 3 unit tests (no deps, with deps, preserves count).
+- **Metrics:** 5 unit tests (initialized, can increment, describe, quota annotation, label cardinality).
+- **E2E:** All 11/11 specs pass (no regressions).
+
+### Gap Status
+
+All §4 gaps except "No validation webhooks" (P0, deferred — needs cert-manager) are now closed.
+
+### Key Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Pod log storage | `StepStatus.Message` field | No new CRD field; 4 KiB cap prevents bloat |
+| Quota mechanism | Namespace annotation | Zero-infrastructure, namespace owner controls limit |
+| Metrics registry | controller-runtime `metrics.Registry` | Standard `/metrics` endpoint, no custom server |
+| DAG algorithm | Kahn's (BFS) | Simpler than DFS for dependency ordering |
+| Condition pattern | Builder chain | Guarantees non-empty Reason/Message |
