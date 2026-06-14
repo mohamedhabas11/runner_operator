@@ -13,7 +13,7 @@
 #### P1 — Important
 
 - [ ] **Capture Pod logs in Workflow step status** — When a step Runner fails, fetch its Pod logs and store them in `WorkflowStepStatus.Message` or a new `Logs` field. Enables debugging without `kubectl logs`. Files: `internal/controller/workflow_controller.go` (reconcile logic), `api/v1alpha1/workflow_types.go` (status field).
-- [ ] **EventTrigger workflow ownership** — In `internal/webhook/events/server.go:createWorkflow`, call `controllerutil.SetControllerReference(trigger, workflow, r.Scheme)` so deleting an EventTrigger cascades to its created Workflows. Requires trigger and workflow in same namespace.
+- [x] **EventTrigger workflow ownership** — ✅ Already implemented (commit `a4c1440`). `server.go:340` calls `controllerutil.SetControllerReference` before creating the workflow.
 - [x] **Implement `gitRepo.Path`** — ✅ Already handled by Session 13 refactoring: `script.go:36-42` validates path existence in init container; `runner_controller.go:153-157` sets `WorkingDir` with path. Original task was stale — written before the gitops factory replaced `buildGitInitContainer`.
 
 #### P2 — Nice to Have
@@ -24,7 +24,7 @@
 - [ ] **Cross-namespace template workflow decision** — Decide: create workflow in template namespace (for reuse) or trigger namespace (for isolation). Document in `arch/blueprint.md`. Update `internal/webhook/events/server.go:299` if needed.
 - [ ] **SharedVolume PVC cross-namespace docs** — Document that PVC references are namespace-scoped. Add note to `arch/blueprint.md` and relevant CRD descriptions.
 - [ ] **Expose `--webhook-event-port` flag docs** — Already configurable via flag in `cmd/main.go:67`. Add to `config/manager/manager.yaml` and document in `README.md`.
-- [ ] **Improve Conditions** — Add descriptive `Reason` and `Message` to all `metav1.Condition` status updates. Currently some conditions set Reason/Message to empty strings.
+- [x] **Improve Conditions** — ✅ Implemented: `internal/controller/conditions.go` with `ConditionBuilder` factory (builder pattern), `ConditionTypeReady` constant, and predefined reason codes for all state transitions. All three controllers (Runner, Workflow, EventTrigger) now set proper `metav1.Condition` with `Reason`/`Message`/`ObservedGeneration` at every phase transition. 7 unit tests covering defaults, chaining, upsert, and per-controller helpers.
 
 #### Chores
 

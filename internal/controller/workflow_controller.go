@@ -8,6 +8,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -19,6 +20,15 @@ import (
 
 	runnersv1alpha1 "github.com/mohamedhabas11/runner_operator/api/v1alpha1"
 )
+
+func setWorkflowCondition(wf *runnersv1alpha1.Workflow, status metav1.ConditionStatus, reason, msg string) {
+	meta.SetStatusCondition(&wf.Status.Conditions, NewCondition(ConditionTypeReady).
+		WithStatus(status).
+		WithReason(reason).
+		WithMessage(msg).
+		WithObservedGeneration(wf.Generation).
+		Build())
+}
 
 // WorkflowReconciler reconciles a Workflow object.
 type WorkflowReconciler struct {
@@ -58,12 +68,24 @@ func (r *WorkflowReconciler) reconcileFlatWorkflow(ctx context.Context, wf *runn
 
 	if len(wf.Spec.Steps) == 0 {
 		r.Recorder.Event(wf, corev1.EventTypeWarning, "NoSteps", "Workflow has no steps defined")
+		patchBase := client.MergeFrom(wf.DeepCopy())
+		setWorkflowCondition(wf, metav1.ConditionFalse, ReasonWorkflowNoSteps, "Workflow has no steps defined")
+		wf.Status.ObservedGeneration = wf.Generation
+		if err := r.Status().Patch(ctx, wf, patchBase); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, nil
 	}
 
 	if cycle := detectCycle(wf.Spec.Steps); cycle != "" {
 		logger.Info("Cycle detected in workflow steps", "cycle", cycle)
 		r.Recorder.Eventf(wf, corev1.EventTypeWarning, "CycleDetected", "Dependency cycle detected: %s", cycle)
+		patchBase := client.MergeFrom(wf.DeepCopy())
+		setWorkflowCondition(wf, metav1.ConditionFalse, ReasonWorkflowCycleDetected, "Dependency cycle detected: "+cycle)
+		wf.Status.ObservedGeneration = wf.Generation
+		if err := r.Status().Patch(ctx, wf, patchBase); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, nil
 	}
 
@@ -96,6 +118,14 @@ func (r *WorkflowReconciler) reconcileFlatWorkflow(ctx context.Context, wf *runn
 		r.Recorder.Eventf(wf, corev1.EventTypeNormal, "PhaseChanged", "Workflow phase changed to %s", newPhase)
 		wf.Status.Phase = newPhase
 		updated = true
+		switch newPhase {
+		case runnersv1alpha1.WorkflowPhaseRunning:
+			setWorkflowCondition(wf, metav1.ConditionFalse, ReasonWorkflowRunning, "Workflow is running")
+		case runnersv1alpha1.WorkflowPhaseSucceeded:
+			setWorkflowCondition(wf, metav1.ConditionTrue, ReasonWorkflowSucceeded, "All steps completed successfully")
+		case runnersv1alpha1.WorkflowPhaseFailed:
+			setWorkflowCondition(wf, metav1.ConditionFalse, ReasonWorkflowFailed, "Workflow failed")
+		}
 	}
 	if isWorkflowTerminal(wf.Status.Phase) && wf.Status.CompletionTime == nil {
 		now := metav1.Now()
@@ -145,6 +175,7 @@ func (r *WorkflowReconciler) handleTimeoutFlat(ctx context.Context, wf *runnersv
 	now := metav1.Now()
 	wf.Status.CompletionTime = &now
 	wf.Status.ObservedGeneration = wf.Generation
+	setWorkflowCondition(wf, metav1.ConditionFalse, ReasonWorkflowTimedOut, "Workflow timed out")
 
 	if err := r.Status().Patch(ctx, wf, patchBase); err != nil {
 		return ctrl.Result{}, err
@@ -170,6 +201,7 @@ func (r *WorkflowReconciler) handleTimeoutJobs(ctx context.Context, wf *runnersv
 	now := metav1.Now()
 	wf.Status.CompletionTime = &now
 	wf.Status.ObservedGeneration = wf.Generation
+	setWorkflowCondition(wf, metav1.ConditionFalse, ReasonWorkflowTimedOut, "Workflow timed out")
 
 	if err := r.Status().Patch(ctx, wf, patchBase); err != nil {
 		return ctrl.Result{}, err
@@ -570,12 +602,24 @@ func (r *WorkflowReconciler) reconcileJobWorkflow(ctx context.Context, wf *runne
 
 	if len(wf.Spec.Jobs) == 0 {
 		r.Recorder.Event(wf, corev1.EventTypeWarning, "NoJobs", "Workflow has no jobs defined")
+		patchBase := client.MergeFrom(wf.DeepCopy())
+		setWorkflowCondition(wf, metav1.ConditionFalse, ReasonWorkflowNoSteps, "Workflow has no jobs defined")
+		wf.Status.ObservedGeneration = wf.Generation
+		if err := r.Status().Patch(ctx, wf, patchBase); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, nil
 	}
 
 	if cycle := detectJobCycle(wf.Spec.Jobs); cycle != "" {
 		logger.Info("Cycle detected in workflow jobs", "cycle", cycle)
 		r.Recorder.Eventf(wf, corev1.EventTypeWarning, "CycleDetected", "Job dependency cycle detected: %s", cycle)
+		patchBase := client.MergeFrom(wf.DeepCopy())
+		setWorkflowCondition(wf, metav1.ConditionFalse, ReasonWorkflowCycleDetected, "Job dependency cycle detected: "+cycle)
+		wf.Status.ObservedGeneration = wf.Generation
+		if err := r.Status().Patch(ctx, wf, patchBase); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, nil
 	}
 
@@ -613,6 +657,14 @@ func (r *WorkflowReconciler) reconcileJobWorkflow(ctx context.Context, wf *runne
 		r.Recorder.Eventf(wf, corev1.EventTypeNormal, "PhaseChanged", "Workflow phase changed to %s", newPhase)
 		wf.Status.Phase = newPhase
 		updated = true
+		switch newPhase {
+		case runnersv1alpha1.WorkflowPhaseRunning:
+			setWorkflowCondition(wf, metav1.ConditionFalse, ReasonWorkflowRunning, "Workflow is running")
+		case runnersv1alpha1.WorkflowPhaseSucceeded:
+			setWorkflowCondition(wf, metav1.ConditionTrue, ReasonWorkflowSucceeded, "All jobs completed successfully")
+		case runnersv1alpha1.WorkflowPhaseFailed:
+			setWorkflowCondition(wf, metav1.ConditionFalse, ReasonWorkflowFailed, "Workflow failed")
+		}
 	}
 	if isWorkflowTerminal(wf.Status.Phase) && wf.Status.CompletionTime == nil {
 		now := metav1.Now()

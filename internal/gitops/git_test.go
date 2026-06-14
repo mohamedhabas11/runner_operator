@@ -273,11 +273,11 @@ func TestBuildVolumes_secretRefNamespace(t *testing.T) {
 	for _, v := range vols {
 		if v.Name == SecretVolumeName {
 			foundSecret = true
-			if v.VolumeSource.Secret == nil {
+			if v.Secret == nil {
 				t.Fatal("expected Secret volume source")
 			}
-			if v.VolumeSource.Secret.SecretName != "my-secret" {
-				t.Fatalf("expected secret name 'my-secret', got %q", v.VolumeSource.Secret.SecretName)
+			if v.Secret.SecretName != "my-secret" {
+				t.Fatalf("expected secret name 'my-secret', got %q", v.Secret.SecretName)
 			}
 		}
 	}

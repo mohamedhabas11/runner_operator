@@ -135,10 +135,10 @@ func extractSSHHost(rawURL string) string {
 	}
 
 	// git@host:path
-	if at := strings.Index(rawURL, "@"); at >= 0 {
-		rest := rawURL[at+1:]
-		if colon := strings.Index(rest, ":"); colon >= 0 {
-			return rest[:colon]
+	if _, after, ok := strings.Cut(rawURL, "@"); ok {
+		rest := after
+		if before, _, ok := strings.Cut(rest, ":"); ok {
+			return before
 		}
 	}
 

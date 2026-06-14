@@ -22,6 +22,8 @@ import (
 	"slices"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -31,6 +33,15 @@ import (
 	runnersv1alpha1 "github.com/mohamedhabas11/runner_operator/api/v1alpha1"
 	"github.com/mohamedhabas11/runner_operator/internal/webhook/events"
 )
+
+func setTriggerCondition(trigger *runnersv1alpha1.EventTrigger, status metav1.ConditionStatus, reason, msg string) {
+	meta.SetStatusCondition(&trigger.Status.Conditions, NewCondition(ConditionTypeReady).
+		WithStatus(status).
+		WithReason(reason).
+		WithMessage(msg).
+		WithObservedGeneration(trigger.Generation).
+		Build())
+}
 
 // EventTriggerReconciler reconciles a EventTrigger object.
 type EventTriggerReconciler struct {
@@ -73,6 +84,8 @@ func (r *EventTriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			patchBase := client.MergeFrom(trigger.DeepCopy())
 			trigger.Status.Registered = false
 			trigger.Status.LastError = fmt.Sprintf("namespace %s not in allowedNamespaces", trigger.Namespace)
+			setTriggerCondition(trigger, metav1.ConditionFalse, ReasonTriggerNamespaceBlocked,
+				"Trigger namespace not in allowedNamespaces")
 			if err := r.Status().Patch(ctx, trigger, patchBase); err != nil {
 				return ctrl.Result{}, err
 			}
@@ -90,6 +103,8 @@ func (r *EventTriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				"Failed to register webhook route %q: %v", trigger.Spec.Webhook.Path, err)
 			trigger.Status.Registered = false
 			trigger.Status.LastError = fmt.Sprintf("route registration failed: %v", err)
+			setTriggerCondition(trigger, metav1.ConditionFalse, ReasonTriggerRouteFailed,
+				"Failed to register webhook route")
 			updated = true
 		} else {
 			if !trigger.Status.Registered {
@@ -98,6 +113,8 @@ func (r *EventTriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request
 					"Webhook route %q registered", trigger.Spec.Webhook.Path)
 				trigger.Status.Registered = true
 				trigger.Status.LastError = ""
+				setTriggerCondition(trigger, metav1.ConditionTrue, ReasonTriggerRouteRegistered,
+					"Webhook route registered")
 				updated = true
 			}
 		}

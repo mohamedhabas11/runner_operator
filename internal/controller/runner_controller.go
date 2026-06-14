@@ -9,6 +9,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -22,6 +23,17 @@ import (
 	runnersv1alpha1 "github.com/mohamedhabas11/runner_operator/api/v1alpha1"
 	"github.com/mohamedhabas11/runner_operator/internal/gitops"
 )
+
+// setRunnerCondition is a helper that constructs a condition using
+// ConditionBuilder and upserts it via meta.SetStatusCondition.
+func setRunnerCondition(runner *runnersv1alpha1.Runner, status metav1.ConditionStatus, reason, msg string) {
+	meta.SetStatusCondition(&runner.Status.Conditions, NewCondition(ConditionTypeReady).
+		WithStatus(status).
+		WithReason(reason).
+		WithMessage(msg).
+		WithObservedGeneration(runner.Generation).
+		Build())
+}
 
 // RunnerReconciler reconciles a Runner object.
 type RunnerReconciler struct {
@@ -100,10 +112,20 @@ func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if runner.Status.ResourceHash != specHash {
 		if existingJob.Status.StartTime != nil && existingJob.Status.CompletionTime == nil {
 			logger.Info("Spec drift detected but Job is running, deferring update")
+			patchBase := client.MergeFrom(runner.DeepCopy())
+			setRunnerCondition(runner, metav1.ConditionFalse, ReasonRunnerSpecDriftDeferred, "Spec drift deferred until Job completes")
+			if err := r.Status().Patch(ctx, runner, patchBase); err != nil {
+				return ctrl.Result{}, err
+			}
 			return ctrl.Result{}, nil
 		}
 		logger.Info("Spec drift detected, deleting and recreating Job")
 		r.Recorder.Event(runner, corev1.EventTypeNormal, "SpecDrift", "Spec changed, recreating Job")
+		patchBase := client.MergeFrom(runner.DeepCopy())
+		setRunnerCondition(runner, metav1.ConditionFalse, ReasonRunnerSpecDriftReplaced, "Spec changed, recreating Job")
+		if err := r.Status().Patch(ctx, runner, patchBase); err != nil {
+			return ctrl.Result{}, err
+		}
 		if err := r.Delete(ctx, existingJob); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -255,6 +277,14 @@ func (r *RunnerReconciler) updateStatusFromJob(ctx context.Context, runner *runn
 	}
 	if completionTime != nil {
 		runner.Status.CompletionTime = completionTime
+	}
+	switch phase {
+	case runnersv1alpha1.RunnerPhaseRunning:
+		setRunnerCondition(runner, metav1.ConditionFalse, ReasonRunnerRunning, "Runner is running")
+	case runnersv1alpha1.RunnerPhaseSucceeded:
+		setRunnerCondition(runner, metav1.ConditionTrue, ReasonRunnerSucceeded, "Runner completed successfully")
+	case runnersv1alpha1.RunnerPhaseFailed:
+		setRunnerCondition(runner, metav1.ConditionFalse, ReasonRunnerFailed, "Runner failed")
 	}
 	logger.Info("Runner phase changed", "phase", phase)
 
