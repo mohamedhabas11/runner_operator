@@ -670,3 +670,47 @@ existing flat-step reconciler path.
 | **Cross-namespace workflow template** | Workflow template lives in any namespace; created Workflow lives in trigger namespace (tenant isolation) |
 | **SharedVolume PVC is namespace-scoped** | PVC references are always namespace-scoped per K8s design; for cross-namespace sharing use EmptyDir or CSI drivers |
 | **`--webhook-event-addr` flag** | Webhook server port is configurable via CLI flag (default `:8080`); documented in `config/manager/manager.yaml` and README |
+| **Metrics default HTTP** | Metrics served on `:8080` (HTTP) by default; `--metrics-secure=true` + `:8443` for HTTPS with cert-manager. Ingress handles TLS in production. |
+| **Validation webhooks deferred** | Requires cert-manager for admission TLS. See "Cert-Manager Setup" section below. |
+
+---
+
+## Cert-Manager Setup
+
+Required for:
+- **Validation webhooks** — admission control for CRDs (P0, blocked on this)
+- **Metrics HTTPS** — optional, when `metrics.secure: true` in chart
+
+### Prerequisites
+
+```bash
+# Install cert-manager
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.0/cert-manager.yaml
+
+# Verify
+kubectl wait --for=condition=Available -n cert-manager deployment/cert-manager-webhook --timeout=60s
+```
+
+### Configuration
+
+1. Ensure `certManager.enable: true` in `dist/chart/values.yaml` (or pass `--set certManager.enable=true` to `helm install`).
+2. Uncomment the `[CERTMANAGER]` sections in `config/default/kustomization.yaml`:
+   - `cert_metrics_manager_patch.yaml` (metrics TLS)
+   - `cert_manager.yaml` (issuer + certificate resources)
+   - CA injection annotations for webhook
+
+### Webhook Validation (Future)
+
+When cert-manager is available, scaffold validating webhooks via:
+
+```bash
+kubebuilder create webhook \
+  --group runners --version v1alpha1 --kind EventTrigger \
+  --programmatic-validation
+```
+
+Validations to implement:
+- `Webhook.Path` uniqueness (no two triggers with the same path)
+- `WorkflowTemplate.Name` non-empty
+- `AllowedNamespaces` entries valid DNS labels
+- `RateLimitConfig` values non-negative

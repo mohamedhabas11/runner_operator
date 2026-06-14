@@ -474,6 +474,13 @@ func (r *WorkflowReconciler) buildStepRunner(ctx context.Context, wf *runnersv1a
 			ns = step.RunnerRef.Namespace
 		}
 		if err := r.Get(ctx, types.NamespacedName{Name: step.RunnerRef.Name, Namespace: ns}, template); err == nil {
+			if ns != wf.Namespace {
+				log.FromContext(ctx).Info("Resolved cross-namespace RunnerRef",
+					"runnerRef", fmt.Sprintf("%s/%s", ns, step.RunnerRef.Name),
+					"workflow", fmt.Sprintf("%s/%s", wf.Namespace, wf.Name))
+				r.Recorder.Eventf(wf, corev1.EventTypeNormal, "CrossNamespaceRunnerRef",
+					"Resolved RunnerRef %s/%s from namespace %s", step.RunnerRef.Name, ns, wf.Namespace)
+			}
 			spec = *template.Spec.DeepCopy()
 			if step.Command != nil {
 				spec.Command = step.Command

@@ -1,0 +1,32 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      controller-runtime:
+        patterns:
+          - sigs.k8s.io/controller-runtime
+          - sigs.k8s.io/controller-tools
+      k8s:
+        patterns:
+          - k8s.io/*
+      prometheus:
+        patterns:
+          - github.com/prometheus/*
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels:
+      - ci
+    commit-message:
+      prefix: chore
+      include: scope

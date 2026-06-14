@@ -1,0 +1,23 @@
+# runner-operator markdownlint configuration
+# Rules: https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
+
+# MD013 - Line length (80 for code, relax for docs)
+MD013:
+  line_length: 120
+  code_blocks: false
+  tables: false
+  headings: false
+
+# MD033 - Inline HTML (needed for HTML in markdown)
+MD033: false
+
+# MD024 - Multiple headings with same content (relax for nested sections)
+MD024:
+  siblings_only: true
+
+# MD041 - First line in file should be a top-level heading
+MD041: false
+
+# MD046 - Code block style
+MD046:
+  style: fenced

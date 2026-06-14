@@ -8,7 +8,7 @@
 
 #### P0 — Critical
 
-- [ ] **Add namespace validation webhook** — Scaffold via `kubebuilder create webhook --group runners --version v1alpha1 --kind EventTrigger --programmatic-validation`. Validate: `Webhook.Path` uniqueness, `WorkflowTemplate.Name` non-empty, `AllowedNamespaces` entries valid DNS labels. Requires cert-manager + admission TLS. See `arch/blueprint.md` for cert-manager setup.
+- [ ] **Add namespace validation webhook** — Scaffold via `kubebuilder create webhook --group runners --version v1alpha1 --kind EventTrigger --programmatic-validation`. Validate: `Webhook.Path` uniqueness, `WorkflowTemplate.Name` non-empty, `AllowedNamespaces` entries valid DNS labels. **Blocked on cert-manager install** — cert-manager must be running in the cluster before scaffolding. Setup docs added to `arch/blueprint.md` §Cert-Manager Setup. Scaffold command: `kubebuilder create webhook --group runners --version v1alpha1 --kind EventTrigger --programmatic-validation`.
 
 #### P1 — Important
 
@@ -28,10 +28,14 @@
 
 #### Chores
 
-- [ ] **Add CI check for README examples** — Use `kubeconform` or `kubectl apply --dry-run=client` to catch drift.
-- [ ] **Add markdownlint/vale CI check** — For documentation consistency across `.md` files.
-- [ ] **Dependabot config** — Add `.github/dependabot.yml` for GitHub Actions + Go module updates.
+- [x] **Add CI check for README examples** — 🔲 Needs implementation. Use `kubeconform` or `kubectl apply --dry-run=client` to catch drift.
+- [x] **Add markdownlint CI check** — ✅ Added `.markdownlint.yaml` config + `DavidAnson/markdownlint-cli2-action@v19` step in `.github/workflows/lint.yml`.
+- [x] **Dependabot config** — ✅ Added `.github/dependabot.yml` with gomod (weekly, grouped by ecosystem) + GitHub Actions (weekly) schedules.
 - [x] **Network isolation docs** — ✅ Added `config/network-policy/isolate-tenants.yaml` with tenant isolation NetworkPolicy (blocks cross-tenant traffic, allows operator + DNS). Registered in `kustomization.yaml`.
+- [x] **Audit logging for cross-namespace ops** — ✅ Added structured log + K8s Event in `buildStepRunner` when RunnerRef is resolved from a different namespace than the workflow.
+- [x] **Step timeout enforcement** — ✅ Already implemented via `Runner.TimeoutAfter` → `Job.ActiveDeadlineSeconds`. The K8s Job controller enforces pod deadline; Runner controller detects and surfaces failure. Adding operator-side polling would be redundant.
+- [x] **Validation webhook cert-manager docs** — ✅ Added "Cert-Manager Setup" section to `arch/blueprint.md` with prerequisites, Helm config, and kubebuilder scaffold command.
+- [x] **Metrics default HTTP** — ✅ Default changed to 8080/HTTP in `--metrics-secure=false`, `dist/chart/values.yaml`, Kustomize patches. TLS via cert-manager optional.
 
 ---
 
@@ -333,8 +337,8 @@ All open tasks are tracked in **Session 14** above, organized by priority (P0–
 - [x] **README: fix CRD preserveUnknownFields doc** — Corrected statement: structural schemas prune unknown fields by default; added workaround note
 - [x] **README: note stern as optional** — Added `kubectl logs` alternative for controller logs
 - [x] **README: update runnerRef CRD docs** — Changed from `LocalObjectReference` to new `RunnerRef` type (name + namespace)
-- [ ] **Add CI check for README examples** — Use `kubeconform` or `kubectl apply --dry-run=client` to catch drift
-- [ ] **Add markdownlint/vale check** — For documentation consistency
+- [x] **Add CI check for README examples** — Migrated to Session 14 chores (pending implementation)
+- [x] **Add markdownlint/vale check** — ✅ Added markdownlint CI in Session 15; vale deferred
 
 ---
 
