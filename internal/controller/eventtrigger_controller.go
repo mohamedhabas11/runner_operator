@@ -28,7 +28,9 @@ import (
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	runnersv1alpha1 "github.com/mohamedhabas11/runner_operator/api/v1alpha1"
 	"github.com/mohamedhabas11/runner_operator/internal/webhook/events"
@@ -164,11 +166,58 @@ func (r *EventTriggerReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	return ctrl.Result{}, nil
 }
 
+// mapSecretToTriggers maps a Secret change to the EventTriggers that reference it.
+// This ensures HMAC secret rotation triggers re-reconciliation, which re-reads the
+// latest secret value and re-registers the webhook route.
+func (r *EventTriggerReconciler) mapSecretToTriggers(ctx context.Context, obj client.Object) []reconcile.Request {
+	secret, ok := obj.(*corev1.Secret)
+	if !ok {
+		return nil
+	}
+
+	var allTriggers runnersv1alpha1.EventTriggerList
+	if err := r.List(ctx, &allTriggers); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to list EventTriggers for secret mapping")
+		return nil
+	}
+
+	var requests []reconcile.Request
+	for i := range allTriggers.Items {
+		trigger := allTriggers.Items[i]
+		if trigger.Spec.Webhook == nil || trigger.Spec.Webhook.SecretRef == nil {
+			continue
+		}
+		ref := trigger.Spec.Webhook.SecretRef
+		if ref.Name != secret.Name {
+			continue
+		}
+		// Empty namespace in the ref means "same namespace as the trigger".
+		if ref.Namespace != "" && ref.Namespace != secret.Namespace {
+			continue
+		}
+		// Ref namespace empty: secret must be in the trigger's namespace.
+		if ref.Namespace == "" && secret.Namespace != trigger.Namespace {
+			continue
+		}
+		requests = append(requests, reconcile.Request{
+			NamespacedName: client.ObjectKey{
+				Namespace: trigger.Namespace,
+				Name:      trigger.Name,
+			},
+		})
+	}
+	return requests
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *EventTriggerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.Recorder = mgr.GetEventRecorderFor("eventtrigger-controller")
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&runnersv1alpha1.EventTrigger{}).
+		Watches(
+			&corev1.Secret{},
+			handler.EnqueueRequestsFromMapFunc(r.mapSecretToTriggers),
+		).
 		Named("eventtrigger").
 		Complete(r)
 }
