@@ -120,9 +120,8 @@ func BuildInitContainer(gitRepo *v1alpha1.GitRepo, strategy AuthStrategy) corev1
 	script := BuildCloneScript(gitRepo, strategy)
 
 	// Start with the workspace volume mount (always needed)
-	mounts := []corev1.VolumeMount{
-		{Name: WorkspaceVolumeName, MountPath: WorkspaceMountPath},
-	}
+	mounts := make([]corev1.VolumeMount, 0, 1+len(strategy.VolumeMounts()))
+	mounts = append(mounts, corev1.VolumeMount{Name: WorkspaceVolumeName, MountPath: WorkspaceMountPath})
 	// Add any strategy-specific mounts (secret, tmpfs, etc.)
 	mounts = append(mounts, strategy.VolumeMounts()...)
 

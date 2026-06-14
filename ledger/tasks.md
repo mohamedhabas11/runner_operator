@@ -12,18 +12,18 @@
 
 #### P1 — Important
 
-- [ ] **Capture Pod logs in Workflow step status** — When a step Runner fails, fetch its Pod logs and store them in `WorkflowStepStatus.Message` or a new `Logs` field. Enables debugging without `kubectl logs`. Files: `internal/controller/workflow_controller.go` (reconcile logic), `api/v1alpha1/workflow_types.go` (status field).
+- [x] **Capture Pod logs in Workflow step status** — ✅ Implemented: `fetchPodLogs` helper fetches last 50 lines of "runner" container logs (capped at 4 KiB) when a step transitions to Failed. Stored in `StepStatus.Message`. Uses `kubernetes.Clientset` from reconciler, initialized in `SetupWithManager`. RBAC for pods + pods/log added.
 - [x] **EventTrigger workflow ownership** — ✅ Already implemented (commit `a4c1440`). `server.go:340` calls `controllerutil.SetControllerReference` before creating the workflow.
 - [x] **Implement `gitRepo.Path`** — ✅ Already handled by Session 13 refactoring: `script.go:36-42` validates path existence in init container; `runner_controller.go:153-157` sets `WorkingDir` with path. Original task was stale — written before the gitops factory replaced `buildGitInitContainer`.
 
 #### P2 — Nice to Have
 
-- [ ] **Workflow step DAG topological sort** — Process steps in dependency order (`dependsOn`) instead of slice order. Add `topologicalSort(steps)` before the reconcile loop in `workflow_controller.go`. Steps with no deps can run in parallel; cycles caught by existing `cycleDetector`.
+- [x] **Workflow step DAG topological sort** — ✅ Implemented: `topologicalSortSteps` (Kahn's algorithm) sorts steps by dependency order. Wired into `reconcileFlatWorkflow` and `reconcileJobSteps` before the reconcile loop. 3 unit tests (no-deps, linear chain, count preservation).
 - [ ] **Prometheus metrics** — Add `controller_runtime_metrics` for: reconciliation count, duration, error rate, job completion rate, workflow phase transitions. Use `metrics.Registry` from `controller-runtime`. File: `internal/controller/` (both controllers).
 - [ ] **Namespace quotas** — Add `MaxConcurrentWorkflows` field to `WorkflowSpec` or controller config. Track active workflows per namespace and reject new ones when quota exceeded.
-- [ ] **Cross-namespace template workflow decision** — Decide: create workflow in template namespace (for reuse) or trigger namespace (for isolation). Document in `arch/blueprint.md`. Update `internal/webhook/events/server.go:299` if needed.
-- [ ] **SharedVolume PVC cross-namespace docs** — Document that PVC references are namespace-scoped. Add note to `arch/blueprint.md` and relevant CRD descriptions.
-- [ ] **Expose `--webhook-event-port` flag docs** — Already configurable via flag in `cmd/main.go:67`. Add to `config/manager/manager.yaml` and document in `README.md`.
+- [x] **Cross-namespace template workflow decision** — ✅ Decision documented in `arch/blueprint.md`: template lives in any namespace; created Workflow lives in trigger namespace (tenant isolation). Already implemented in `server.go:299`.
+- [x] **SharedVolume PVC cross-namespace docs** — ✅ Documented in `arch/blueprint.md`: PVC refs are namespace-scoped per K8s design; use EmptyDir or CSI for cross-namespace.
+- [x] **Expose `--webhook-event-port` flag docs** — ✅ Added `--webhook-event-addr=:8080` to `config/manager/manager.yaml` args. Documented in `arch/blueprint.md` design decisions.
 - [x] **Improve Conditions** — ✅ Implemented: `internal/controller/conditions.go` with `ConditionBuilder` factory (builder pattern), `ConditionTypeReady` constant, and predefined reason codes for all state transitions. All three controllers (Runner, Workflow, EventTrigger) now set proper `metav1.Condition` with `Reason`/`Message`/`ObservedGeneration` at every phase transition. 7 unit tests covering defaults, chaining, upsert, and per-controller helpers.
 
 #### Chores
@@ -31,7 +31,7 @@
 - [ ] **Add CI check for README examples** — Use `kubeconform` or `kubectl apply --dry-run=client` to catch drift between CRD schemas and README examples.
 - [ ] **Add markdownlint/vale CI check** — For documentation consistency across `.md` files.
 - [ ] **Dependabot config** — Add `.github/dependabot.yml` for GitHub Actions version updates.
-- [ ] **Network isolation docs** — Add namespace isolation network policy examples to `config/` for multi-tenant deployments.
+- [x] **Network isolation docs** — ✅ Added `config/network-policy/isolate-tenants.yaml` with tenant isolation NetworkPolicy (blocks cross-tenant traffic, allows operator + DNS). Registered in `kustomization.yaml`.
 
 ---
 

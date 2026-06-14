@@ -667,3 +667,6 @@ existing flat-step reconciler path.
 | **RunnerRef cross-namespace (`runnerRef.namespace`)** | Workflow steps can reference Runner templates in any namespace; defaults to workflow's namespace for backward compat |
 | **AllowedNamespaces enforcement** | EventTrigger can restrict which namespaces its webhook may create Workflows in; enforced in both webhook server and controller (defence in depth) |
 | **EventTrigger → Workflow owner reference** | Webhook-created Workflows are owned by their EventTrigger; GC cascades on trigger deletion (no orphaned Workflows) |
+| **Cross-namespace workflow template** | Workflow template lives in any namespace; created Workflow lives in trigger namespace (tenant isolation) |
+| **SharedVolume PVC is namespace-scoped** | PVC references are always namespace-scoped per K8s design; for cross-namespace sharing use EmptyDir or CSI drivers |
+| **`--webhook-event-addr` flag** | Webhook server port is configurable via CLI flag (default `:8080`); documented in `config/manager/manager.yaml` and README |

@@ -308,3 +308,51 @@ func TestComputeJobWorkflowPhase(t *testing.T) {
 		t.Errorf("no statuses: got %v, want Pending", got)
 	}
 }
+
+func step(name string, deps ...string) runnersv1alpha1.WorkflowStep {
+	return runnersv1alpha1.WorkflowStep{Name: name, DependsOn: deps, Image: "busybox"}
+}
+
+func TestTopologicalSortSteps_noDeps(t *testing.T) {
+	steps := []runnersv1alpha1.WorkflowStep{step("b"), step("a"), step("c")}
+	sorted := topologicalSortSteps(steps)
+	if len(sorted) != 3 {
+		t.Fatalf("expected 3 steps, got %d", len(sorted))
+	}
+	// Order isn't guaranteed for independent steps, but all must be present
+	names := make(map[string]bool)
+	for _, s := range sorted {
+		names[s.Name] = true
+	}
+	for _, s := range steps {
+		if !names[s.Name] {
+			t.Fatalf("missing step %s after sort", s.Name)
+		}
+	}
+}
+
+func TestTopologicalSortSteps_withDeps(t *testing.T) {
+	// c depends on b, b depends on a → order must be a, b, c
+	steps := []runnersv1alpha1.WorkflowStep{step("c", "b"), step("a"), step("b", "a")}
+	sorted := topologicalSortSteps(steps)
+
+	pos := make(map[string]int)
+	for i, s := range sorted {
+		pos[s.Name] = i
+	}
+
+	if pos["a"] > pos["b"] {
+		t.Fatalf("expected a before b, got a=%d b=%d", pos["a"], pos["b"])
+	}
+	if pos["b"] > pos["c"] {
+		t.Fatalf("expected b before c, got b=%d c=%d", pos["b"], pos["c"])
+	}
+}
+
+func TestTopologicalSortSteps_preservesCount(t *testing.T) {
+	steps := []runnersv1alpha1.WorkflowStep{step("x"), step("y", "x"), step("z", "x")}
+	sorted := topologicalSortSteps(steps)
+	if len(sorted) != 3 {
+		t.Fatalf("expected 3 steps, got %d", len(sorted))
+	}
+}

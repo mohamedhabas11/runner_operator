@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,8 +34,9 @@ func setWorkflowCondition(wf *runnersv1alpha1.Workflow, status metav1.ConditionS
 // WorkflowReconciler reconciles a Workflow object.
 type WorkflowReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Scheme    *runtime.Scheme
+	Recorder  record.EventRecorder
+	K8sClient kubernetes.Interface
 }
 
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=workflows,verbs=get;list;watch;create;update;patch;delete
@@ -42,6 +44,8 @@ type WorkflowReconciler struct {
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=runners,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=runners/status,verbs=get
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core,resources=pods/log,verbs=get
 
 func (r *WorkflowReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -111,6 +115,7 @@ func (r *WorkflowReconciler) reconcileFlatWorkflow(ctx context.Context, wf *runn
 		updated = true
 	}
 
+	wf.Spec.Steps = topologicalSortSteps(wf.Spec.Steps)
 	updated = r.reconcileSteps(ctx, wf, stepRunners) || updated
 
 	newPhase := computeFlatWorkflowPhase(wf)
@@ -326,6 +331,17 @@ func (r *WorkflowReconciler) reconcileStepLoop(
 					updated = true
 					stepStatusMap = buildStepStatusMap(wf)
 				} else if !hasStatus || status.Phase != stepPhase {
+					if stepPhase == runnersv1alpha1.StepPhaseFailed {
+						logs := r.fetchPodLogs(ctx, &existing)
+						if logs != "" {
+							for i, s := range wf.Status.StepStatuses {
+								if s.Name == step.Name {
+									wf.Status.StepStatuses[i].Message = logs
+									break
+								}
+							}
+						}
+					}
 					upsertStepStatus(wf, step.Name, stepPhase)
 					updated = true
 					stepStatusMap = buildStepStatusMap(wf)
@@ -759,6 +775,7 @@ func (r *WorkflowReconciler) reconcileJob(ctx context.Context, wf *runnersv1alph
 }
 
 func (r *WorkflowReconciler) reconcileJobSteps(ctx context.Context, wf *runnersv1alpha1.Workflow, job *runnersv1alpha1.JobSpec, stepRunners []runnersv1alpha1.Runner) bool {
+	job.Steps = topologicalSortSteps(job.Steps)
 	return r.reconcileStepLoop(ctx, wf, job.Steps, stepRunners,
 		func(step *runnersv1alpha1.WorkflowStep) *runnersv1alpha1.Runner {
 			return r.buildJobStepRunner(ctx, wf, job, step)
@@ -1033,6 +1050,88 @@ func isWorkflowTerminal(phase runnersv1alpha1.WorkflowPhase) bool {
 	return phase == runnersv1alpha1.WorkflowPhaseSucceeded || phase == runnersv1alpha1.WorkflowPhaseFailed
 }
 
+// topologicalSortSteps reorders steps so that dependencies appear before dependants
+// using Kahn's algorithm. Steps with no dependencies come first.
+// WHY: Without sorting, the reconciler may need multiple passes to discover that
+// a step's dependencies aren't met. Sorting ensures a single-pass reconcile
+// processes steps in the correct order, reducing API calls and latency.
+func topologicalSortSteps(steps []runnersv1alpha1.WorkflowStep) []runnersv1alpha1.WorkflowStep {
+	inDegree := make(map[string]int, len(steps))
+	children := make(map[string][]string, len(steps))
+	byName := make(map[string]runnersv1alpha1.WorkflowStep, len(steps))
+
+	for _, s := range steps {
+		inDegree[s.Name] = 0
+		byName[s.Name] = s
+	}
+
+	for _, s := range steps {
+		for _, dep := range s.DependsOn {
+			children[dep] = append(children[dep], s.Name)
+			inDegree[s.Name]++
+		}
+	}
+
+	queue := make([]string, 0, len(steps))
+	for _, s := range steps {
+		if inDegree[s.Name] == 0 {
+			queue = append(queue, s.Name)
+		}
+	}
+
+	sorted := make([]runnersv1alpha1.WorkflowStep, 0, len(steps))
+	for len(queue) > 0 {
+		name := queue[0]
+		queue = queue[1:]
+		sorted = append(sorted, byName[name])
+		for _, child := range children[name] {
+			inDegree[child]--
+			if inDegree[child] == 0 {
+				queue = append(queue, child)
+			}
+		}
+	}
+
+	return sorted
+}
+
+// maxLogBytes caps the amount of Pod log text stored in a step status.
+// WHY: Unbounded log output could bloat the CRD resource and overwhelm
+// the API server. 4 KiB is sufficient for a failure reason or stack trace.
+const maxLogBytes = 4096
+
+// fetchPodLogs retrieves the last N bytes of the "runner" container log for
+// the Pod owned by the given Runner. Returns an empty string on any error
+// (missing Pod, no logs, permissions) — the controller treats logs as
+// best-effort debugging aid, not a correctness requirement.
+func (r *WorkflowReconciler) fetchPodLogs(ctx context.Context, runner *runnersv1alpha1.Runner) string {
+	jobName := runner.Name + "-job"
+
+	podList := &corev1.PodList{}
+	if err := r.List(ctx, podList,
+		client.InNamespace(runner.Namespace),
+		client.MatchingLabels{"job-name": jobName},
+	); err != nil || len(podList.Items) == 0 {
+		return ""
+	}
+
+	tail := int64(50)
+	logOpts := &corev1.PodLogOptions{
+		Container: "runner",
+		TailLines: &tail,
+	}
+	logReq := r.K8sClient.CoreV1().Pods(runner.Namespace).GetLogs(podList.Items[0].Name, logOpts)
+	logBytes, err := logReq.Do(ctx).Raw()
+	if err != nil || len(logBytes) == 0 {
+		return ""
+	}
+
+	if len(logBytes) > maxLogBytes {
+		logBytes = logBytes[len(logBytes)-maxLogBytes:]
+	}
+	return string(logBytes)
+}
+
 // retryBackoffElapsed implements exponential backoff for step retries.
 // Returns true when the backoff period has elapsed since the step's last completion.
 // Formula: delay = InitialDelay * 2^retryCount, capped at MaxDelay.
@@ -1055,6 +1154,12 @@ func retryBackoffElapsed(step *runnersv1alpha1.WorkflowStep, status *runnersv1al
 // SetupWithManager sets up the controller with the Manager.
 func (r *WorkflowReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.Recorder = mgr.GetEventRecorderFor("workflow-controller")
+	cfg := mgr.GetConfig()
+	k8sClient, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create kubernetes client: %w", err)
+	}
+	r.K8sClient = k8sClient
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&runnersv1alpha1.Workflow{}).
 		Owns(&runnersv1alpha1.Runner{}).
