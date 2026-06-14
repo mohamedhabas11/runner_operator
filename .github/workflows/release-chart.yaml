@@ -19,7 +19,7 @@ jobs:
       - name: Fetch tags for release notes
         run: git fetch --tags
 
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
 
       - name: Set chart version from tag
         run: |
