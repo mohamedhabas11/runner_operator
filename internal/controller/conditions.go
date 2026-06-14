@@ -88,9 +88,6 @@ const (
 	ReasonRunnerValidationFailed  = "ValidationFailed"
 	ReasonRunnerTerminated        = "RunnerTerminated"
 
-	// RunnerFinalizer prevents mid-execution deletion of Runners.
-	RunnerFinalizer = "runner-operator.io/cleanup"
-
 	// Workflow reasons
 	ReasonWorkflowPending        = "Pending"
 	ReasonWorkflowRunning        = "Running"

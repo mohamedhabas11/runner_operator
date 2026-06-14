@@ -4076,12 +4076,6 @@ rules:
   - get
   - patch
   - update
-- apiGroups:
-  - runners.runner-operator.io
-  resources:
-  - runners/finalizers
-  verbs:
-  - update
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole

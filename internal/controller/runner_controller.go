@@ -43,7 +43,6 @@ type RunnerReconciler struct {
 
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=runners,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=runners/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=runners.runner-operator.io,resources=runners/finalizers,verbs=update
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=batch,resources=jobs/status,verbs=get
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
@@ -59,16 +58,11 @@ func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	if !runner.DeletionTimestamp.IsZero() {
-		return r.handleTermination(ctx, runner)
-	}
-
-	if !controllerutil.ContainsFinalizer(runner, RunnerFinalizer) {
-		patchBase := client.MergeFrom(runner.DeepCopy())
-		controllerutil.AddFinalizer(runner, RunnerFinalizer)
-		if err := r.Patch(ctx, runner, patchBase); err != nil {
-			return ctrl.Result{}, err
+		if isNonTerminalPhase(runner.Status.Phase) {
+			RunnerActiveCount.WithLabelValues(runner.Namespace, string(runner.Status.Phase)).Dec()
 		}
-		logger.Info("Added finalizer", "finalizer", RunnerFinalizer)
+		logger.Info("Runner is being deleted, relying on OwnerReferences for cleanup")
+		return ctrl.Result{}, nil
 	}
 
 	specHash, err := computeSpecHash(runner.Spec)
@@ -185,52 +179,6 @@ func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	return r.updateStatusFromJob(ctx, runner, existingJob)
-}
-
-// handleTermination manages the graceful shutdown of a Runner that is being
-// deleted while its Job may still be running. It defers finalizer removal
-// until the Job completes, preventing silent mid-execution data loss.
-func (r *RunnerReconciler) handleTermination(ctx context.Context, runner *runnersv1alpha1.Runner) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-	if !controllerutil.ContainsFinalizer(runner, RunnerFinalizer) {
-		return ctrl.Result{}, nil
-	}
-
-	jobName := runner.Name + "-job"
-	existingJob := &batchv1.Job{}
-	err := r.Get(ctx, types.NamespacedName{Name: jobName, Namespace: runner.Namespace}, existingJob)
-	jobRunning := err == nil && existingJob.Status.StartTime != nil && existingJob.Status.CompletionTime == nil
-
-	if err != nil && !apierrors.IsNotFound(err) {
-		return ctrl.Result{}, err
-	}
-
-	if jobRunning {
-		logger.Info("Runner deletion deferred — Job still running, waiting for completion")
-		patchBase := client.MergeFrom(runner.DeepCopy())
-		setRunnerCondition(runner, metav1.ConditionFalse, ReasonRunnerTerminated,
-			"Runner termination deferred until running Job completes")
-		if patchErr := r.Status().Patch(ctx, runner, patchBase); patchErr != nil {
-			return ctrl.Result{}, patchErr
-		}
-		r.Recorder.Event(runner, corev1.EventTypeWarning, "RunnerTerminating",
-			"Runner deletion deferred until running Job completes")
-		return ctrl.Result{}, nil
-	}
-
-	if isNonTerminalPhase(runner.Status.Phase) {
-		RunnerActiveCount.WithLabelValues(runner.Namespace, string(runner.Status.Phase)).Dec()
-	}
-
-	patchBase := client.MergeFrom(runner.DeepCopy())
-	controllerutil.RemoveFinalizer(runner, RunnerFinalizer)
-	if err := r.Patch(ctx, runner, patchBase); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	r.Recorder.Event(runner, corev1.EventTypeNormal, "RunnerTerminated", "Runner cleanup complete")
-	logger.Info("Removed finalizer, Runner will be deleted")
-	return ctrl.Result{}, nil
 }
 
 func (r *RunnerReconciler) buildJob(runner *runnersv1alpha1.Runner, jobName, specHash string) *batchv1.Job {

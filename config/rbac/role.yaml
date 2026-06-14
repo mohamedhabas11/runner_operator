@@ -69,9 +69,3 @@ rules:
   - get
   - patch
   - update
-- apiGroups:
-  - runners.runner-operator.io
-  resources:
-  - runners/finalizers
-  verbs:
-  - update

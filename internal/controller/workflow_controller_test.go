@@ -9,7 +9,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	runnersv1alpha1 "github.com/mohamedhabas11/runner_operator/api/v1alpha1"
@@ -49,13 +48,9 @@ var _ = Describe("Workflow Controller", func() {
 		})
 
 		AfterEach(func() {
-			// Remove finalizer then delete the workflow
 			workflow := &runnersv1alpha1.Workflow{}
 			err := k8sClient.Get(ctx, typeNamespacedName, workflow)
 			if err == nil {
-				original := workflow.DeepCopy()
-				workflow.Finalizers = nil
-				_ = k8sClient.Patch(ctx, workflow, client.MergeFrom(original))
 				_ = k8sClient.Delete(ctx, workflow)
 			}
 		})
@@ -245,8 +240,5 @@ func cleanupWorkflow(ctx context.Context, name string) {
 	if err := k8sClient.Get(ctx, nsName, wf); err != nil {
 		return
 	}
-	original := wf.DeepCopy()
-	wf.Finalizers = nil
-	_ = k8sClient.Patch(ctx, wf, client.MergeFrom(original))
 	_ = k8sClient.Delete(ctx, wf)
 }

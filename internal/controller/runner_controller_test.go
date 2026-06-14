@@ -9,7 +9,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -48,14 +47,9 @@ var _ = Describe("Runner Controller", func() {
 		})
 
 		AfterEach(func() {
-			// Remove finalizer first so deletion can complete
 			err := k8sClient.Get(ctx, typeNamespacedName, runner)
 			if err == nil {
-				original := runner.DeepCopy()
-				runner.Finalizers = nil
-				if err := k8sClient.Patch(ctx, runner, client.MergeFrom(original)); err == nil {
-					Expect(k8sClient.Delete(ctx, runner)).To(Succeed())
-				}
+				Expect(k8sClient.Delete(ctx, runner)).To(Succeed())
 			}
 		})
 
@@ -294,11 +288,6 @@ func cleanupRunner(ctx context.Context, name string) {
 	if err := k8sClient.Get(ctx, nsName, runner); err != nil {
 		return
 	}
-	// Remove finalizer so the object can be deleted
-	original := runner.DeepCopy()
-	runner.Finalizers = nil
-	if err := k8sClient.Patch(ctx, runner, client.MergeFrom(original)); err != nil {
-		return
-	}
+	// Runner relies on OwnerReferences for cleanup (no finalizers).
 	_ = k8sClient.Delete(ctx, runner)
 }
