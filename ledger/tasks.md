@@ -534,3 +534,53 @@ Now:
 - `make manifests generate build-installer` — OK
 - `make test` — 25/25 specs passing (9.9s, 59.5% coverage)
 - `go vet ./...` — OK
+
+---
+
+### Session 20 — Retry counter, chart RBAC, sharedVolume sample fixes
+
+**Source:** Integration tester `findings.log` (v0.3.4 chart)
+
+| # | Finding | Fix |
+|---|---------|------|
+| 1 | Chart RBAC template `dist/chart/templates/rbac/manager-role.yaml` out of sync with `config/rbac/role.yaml` | Rewrote chart template to match: added `namespaces`, `pods/log`, `pods:delete` |
+| 2 | Retry counter never increments past 1 — `!hasRunner` branch uses `append` instead of `upsertStepStatus`, creating duplicate `StepStatus` entry that resets `RetryCount` | Fixed: replaced `append` with `upsertStepStatus`, added message fallback for new entries |
+| 3 | `sharedVolume` with `emptyDir` sample suggests data sharing across steps (impossible — each step gets its own Pod) | Removed the `write`→`read` emptyDir pattern from the sample; kept volume/mount demo in `deploy` job |
+
+**Root cause of Fix 2 (retry counter):**
+
+Before:
+```go
+// line 321 — creates a new StepStatus entry, discarding RetryCount
+wf.Status.StepStatuses = append(wf.Status.StepStatuses, runnersv1alpha1.StepStatus{
+    Name:    step.Name,
+    Phase:   runnersv1alpha1.StepPhasePending,
+    Message: "Runner created",
+})
+```
+
+After:
+```go
+// upsertStepStatus preserves existing RetryCount on retry
+upsertStepStatus(wf, step.Name, runnersv1alpha1.StepPhasePending)
+// message only set for genuinely new entries (empty Message)
+for i, s := range wf.Status.StepStatuses {
+    if s.Name == step.Name && s.Phase == runnersv1alpha1.StepPhasePending && s.Message == "" {
+        wf.Status.StepStatuses[i].Message = "Runner created"
+        break
+    }
+}
+```
+
+**Files modified:**
+- `internal/controller/workflow_controller.go` — retry counter fix in `reconcileStepLoop`
+- `dist/chart/templates/rbac/manager-role.yaml` — full rewrite to match role.yaml
+- `dist/chart/templates/samples/workflow-volumes.yaml` — removed broken emptyDir sharedVolume
+- `dist/chart/Chart.yaml` — v0.3.5
+- `dist/install.yaml` — regenerated
+
+**Verification:**
+- `make manifests generate build-installer` — OK
+- `helm lint dist/chart` — 1 info, 0 failures
+- `make test` — 25/25 specs passing (10.0s, 60.1% coverage)
+- `go vet ./...` — OK

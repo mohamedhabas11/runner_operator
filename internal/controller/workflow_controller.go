@@ -318,11 +318,14 @@ func (r *WorkflowReconciler) reconcileStepLoop(
 					logger.Error(err, "Failed to create Runner", "step", step.Name, "job", jobName)
 					continue
 				}
-				wf.Status.StepStatuses = append(wf.Status.StepStatuses, runnersv1alpha1.StepStatus{
-					Name:    step.Name,
-					Phase:   runnersv1alpha1.StepPhasePending,
-					Message: "Runner created",
-				})
+				upsertStepStatus(wf, step.Name, runnersv1alpha1.StepPhasePending)
+				stepStatusMap = buildStepStatusMap(wf)
+				for i, s := range wf.Status.StepStatuses {
+					if s.Name == step.Name && s.Phase == runnersv1alpha1.StepPhasePending && s.Message == "" {
+						wf.Status.StepStatuses[i].Message = "Runner created"
+						break
+					}
+				}
 				updated = true
 				stepStatusMap = buildStepStatusMap(wf)
 			} else {

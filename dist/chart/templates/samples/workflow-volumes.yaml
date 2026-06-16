@@ -12,19 +12,11 @@ spec:
   timeout: "30m"
   jobs:
     - name: build
-      sharedVolume:
-        mountPath: "/workspace"
-        emptyDir: {}
       steps:
-        - name: write
+        - name: build-step
           image: busybox:latest
           command: ["sh", "-c"]
-          args: ["echo 'hello from ephemeral runner' > /workspace/artifact.txt"]
-        - name: read
-          image: busybox:latest
-          command: ["sh", "-c"]
-          args: ["cat /workspace/artifact.txt"]
-          dependsOn: ["write"]
+          args: ["echo building && sleep 2"]
     - name: deploy
       needs: ["build"]
       serviceAccountName: ci-deployer
