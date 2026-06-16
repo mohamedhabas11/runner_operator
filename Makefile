@@ -146,6 +146,7 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 
 .PHONY: sync-chart
 sync-chart: manifests generate ## Sync CRDs to Helm chart and regenerate installer.
+	rm -f dist/chart/templates/crd/*.yaml
 	cp config/crd/bases/*.yaml dist/chart/templates/crd/
 	$(MAKE) build-installer
 
