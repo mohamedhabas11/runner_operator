@@ -584,3 +584,55 @@ for i, s := range wf.Status.StepStatuses {
 - `helm lint dist/chart` — 1 info, 0 failures
 - `make test` — 25/25 specs passing (10.0s, 60.1% coverage)
 - `go vet ./...` — OK
+
+---
+
+### Session 21 — Pre-flight checks (RBAC self-awareness + CRD validation)
+
+**Why:** Integration tests revealed two maintenance pain points:
+1. **Chart RBAC template gets stale** — devs had to manually copy CRDs and remember to sync
+2. **No RBAC informer** — operator can't detect when its ClusterRole is patched (permissions added/removed)
+3. **Silent CRD mismatch** — `helm upgrade` doesn't update CRDs; operator had no way to warn users
+
+**What was built:**
+
+#### 1. Pre-flight RBAC check (`internal/startup/rbac.go`)
+- Uses `SelfSubjectRulesReview` (zero extra RBAC required — any subject can self-review)
+- Checks all 50+ expected permissions from `config/rbac/role.yaml` against actual granted rules
+- Logs each missing permission as a warning with `resource`, `verb`, `group` fields
+- Runs at operator startup and reports count of missing permissions
+
+#### 2. Periodic RBAC re-check (`startup.RbacCheckRunnable`)
+- Runs every 5 minutes as a controller-runtime `Runnable`
+- Tracks previous permission state and logs when permissions are added or removed
+- If a permission was present and is now missing: `"RBAC permission was removed - operator restart may be required"`
+- If a permission was missing and is now present: `"RBAC permission was added - operator restart may be required to use new features"`
+
+#### 3. Pre-flight CRD validation (`internal/startup/crd.go`)
+- Lists `CustomResourceDefinition` objects (needs new `apiextensions.k8s.io` RBAC marker)
+- Checks that all 3 managed CRDs (`runners`, `workflows`, `eventtriggers`) are installed
+- Validates that the expected version (`v1alpha1`) is served
+- Logs actionable message: `"CRD version mismatch - upgrade the CRDs with 'kubectl apply -f <crd-file>'"`
+- This catches the common `helm upgrade` pitfall where CRDs are not updated
+
+#### 4. `make sync-chart` target
+- Single command: runs `manifests generate`, copies CRDs from `config/crd/bases/` to `dist/chart/templates/crd/`, then rebuilds `dist/install.yaml`
+- Prevents chart CRDs from getting out of sync with the source of truth
+
+**Files modified:**
+- `internal/startup/rbac.go` — RBAC self-check + periodic runnable
+- `internal/startup/crd.go` — CRD version validation
+- `cmd/main.go` — wired pre-flight checks and periodic Runnable
+- `internal/controller/runner_controller.go` — added `apiextensions.k8s.io` RBAC marker
+- `Makefile` — added `sync-chart` target
+- `config/rbac/role.yaml` — regenerated with CRD listing RBAC
+- `config/crd/bases/` — regenerated
+- `dist/chart/templates/crd/` — synced via `make sync-chart`
+- `dist/install.yaml` — regenerated
+- `dist/chart/Chart.yaml` — v0.3.6
+
+**Verification:**
+- `make manifests generate fmt vet` — clean (no compile errors)
+- `helm lint dist/chart` — 1 info, 0 failures
+- `make test` — 25/25 specs passing (9.7s, 60.1% coverage)
+- `make sync-chart` — clean (CRDs synced, installer regenerated)

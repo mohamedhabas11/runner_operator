@@ -144,6 +144,11 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 	- $(CONTAINER_TOOL) buildx rm runner-operator-builder
 	rm Dockerfile.cross
 
+.PHONY: sync-chart
+sync-chart: manifests generate ## Sync CRDs to Helm chart and regenerate installer.
+	cp config/crd/bases/*.yaml dist/chart/templates/crd/
+	$(MAKE) build-installer
+
 .PHONY: build-installer
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
 	mkdir -p dist

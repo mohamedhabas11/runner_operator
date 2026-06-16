@@ -20,11 +20,13 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -37,6 +39,7 @@ import (
 
 	runnersv1alpha1 "github.com/mohamedhabas11/runner_operator/api/v1alpha1"
 	"github.com/mohamedhabas11/runner_operator/internal/controller"
+	"github.com/mohamedhabas11/runner_operator/internal/startup"
 	"github.com/mohamedhabas11/runner_operator/internal/webhook/events"
 	// +kubebuilder:scaffold:imports
 )
@@ -48,6 +51,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(apiextensionsv1.AddToScheme(scheme))
 
 	utilruntime.Must(runnersv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
@@ -178,6 +182,27 @@ func main() {
 	if err != nil {
 		setupLog.Error(err, "Failed to start manager")
 		os.Exit(1)
+	}
+
+	setupLog.Info("Running pre-flight checks")
+
+	if missing, err := startup.CheckRBAC(ctrl.SetupSignalHandler(), mgr.GetClient()); err != nil {
+		setupLog.Error(err, "RBAC pre-flight check failed")
+	} else if len(missing) > 0 {
+		setupLog.WithValues("count", len(missing)).Info("RBAC pre-flight check completed with warnings")
+	} else {
+		setupLog.Info("RBAC pre-flight check passed")
+	}
+
+	if err := startup.CheckCRDs(ctrl.SetupSignalHandler(), mgr.GetClient()); err != nil {
+		setupLog.Error(err, "CRD pre-flight check failed")
+	}
+
+	if err := mgr.Add(&startup.RbacCheckRunnable{
+		Client:   mgr.GetClient(),
+		Interval: 5 * time.Minute,
+	}); err != nil {
+		setupLog.Error(err, "Failed to add periodic RBAC check")
 	}
 
 	if err := (&controller.RunnerReconciler{
