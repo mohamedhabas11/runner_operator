@@ -171,7 +171,7 @@ var _ = Describe("Runner Controller", func() {
 			sc := job.Spec.Template.Spec.Containers[0].SecurityContext
 			Expect(sc).NotTo(BeNil())
 			Expect(sc.AllowPrivilegeEscalation).To(HaveValue(BeFalse()))
-			Expect(sc.ReadOnlyRootFilesystem).To(HaveValue(BeTrue()))
+			Expect(sc.ReadOnlyRootFilesystem).To(BeNil(), "ReadOnlyRootFilesystem is not set by default; use spec.securityContext to opt in")
 		})
 
 		It("should transition through Pending and Succeeded phases", func() {

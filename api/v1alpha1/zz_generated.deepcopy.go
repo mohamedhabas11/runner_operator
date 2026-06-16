@@ -456,6 +456,11 @@ func (in *RunnerSpec) DeepCopyInto(out *RunnerSpec) {
 		**out = **in
 	}
 	in.Resources.DeepCopyInto(&out.Resources)
+	if in.SecurityContext != nil {
+		in, out := &in.SecurityContext, &out.SecurityContext
+		*out = new(v1.SecurityContext)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.GitRepo != nil {
 		in, out := &in.GitRepo, &out.GitRepo
 		*out = new(GitRepo)

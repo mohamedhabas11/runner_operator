@@ -118,3 +118,74 @@ func TestBuildJob_ServiceAccountName_emptyString(t *testing.T) {
 		t.Errorf("expected empty ServiceAccountName for explicit empty string, got %q", job.Spec.Template.Spec.ServiceAccountName)
 	}
 }
+
+func TestBuildJob_SecurityContext_default(t *testing.T) {
+	runner := &runnersv1alpha1.Runner{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+		Spec: runnersv1alpha1.RunnerSpec{
+			Image: "busybox:latest",
+		},
+	}
+	var r *RunnerReconciler
+	job := r.buildJob(runner, "test-job", "abc123")
+
+	sc := job.Spec.Template.Spec.Containers[0].SecurityContext
+	if sc == nil {
+		t.Fatal("expected non-nil SecurityContext by default")
+	}
+	if sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation != false {
+		t.Error("expected AllowPrivilegeEscalation=false by default")
+	}
+	if sc.ReadOnlyRootFilesystem != nil {
+		t.Error("expected ReadOnlyRootFilesystem=nil by default (opt-in via spec.securityContext)")
+	}
+	if sc.Capabilities == nil || sc.Capabilities.Drop == nil {
+		t.Fatal("expected Capabilities.Drop by default")
+	}
+	foundAll := false
+	for _, c := range sc.Capabilities.Drop {
+		if c == "ALL" {
+			foundAll = true
+			break
+		}
+	}
+	if !foundAll {
+		t.Error("expected 'ALL' in Capabilities.Drop by default")
+	}
+}
+
+func TestBuildJob_SecurityContext_custom(t *testing.T) {
+	readOnly := true
+	sc := &corev1.SecurityContext{
+		ReadOnlyRootFilesystem: &readOnly,
+		RunAsUser:              ptr[int64](2000),
+	}
+	runner := &runnersv1alpha1.Runner{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+		Spec: runnersv1alpha1.RunnerSpec{
+			Image:           "busybox:latest",
+			SecurityContext: sc,
+		},
+	}
+	var r *RunnerReconciler
+	job := r.buildJob(runner, "test-job", "abc123")
+
+	got := job.Spec.Template.Spec.Containers[0].SecurityContext
+	if got == nil {
+		t.Fatal("expected non-nil SecurityContext")
+	}
+	if got.ReadOnlyRootFilesystem == nil || *got.ReadOnlyRootFilesystem != true {
+		t.Error("expected ReadOnlyRootFilesystem=true from custom SecurityContext")
+	}
+	if got.RunAsUser == nil || *got.RunAsUser != 2000 {
+		t.Errorf("expected RunAsUser=2000, got %v", got.RunAsUser)
+	}
+	// Custom SecurityContext replaces defaults entirely — AllowPrivilegeEscalation should not be set
+	if got.AllowPrivilegeEscalation != nil {
+		t.Error("expected AllowPrivilegeEscalation=nil when custom SecurityContext is set")
+	}
+}
+
+func ptr[T any](v T) *T {
+	return &v
+}

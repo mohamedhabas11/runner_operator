@@ -45,7 +45,7 @@ type RunnerReconciler struct {
 // +kubebuilder:rbac:groups=runners.runner-operator.io,resources=runners/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=batch,resources=jobs/status,verbs=get
-// +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;delete
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
@@ -184,23 +184,30 @@ func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 func (r *RunnerReconciler) buildJob(runner *runnersv1alpha1.Runner, jobName, specHash string) *batchv1.Job {
 	backoffLimit := int32(0)
 
+	sc := runner.Spec.SecurityContext
+	if sc == nil {
+		sc = &corev1.SecurityContext{
+			AllowPrivilegeEscalation: new(false),
+			Capabilities: &corev1.Capabilities{
+				Drop: []corev1.Capability{"ALL"},
+			},
+			SeccompProfile: &corev1.SeccompProfile{
+				Type: corev1.SeccompProfileTypeRuntimeDefault,
+			},
+		}
+	}
+
 	containers := []corev1.Container{
 		{
-			Name:         "runner",
-			Image:        runner.Spec.Image,
-			Env:          runner.Spec.Env,
-			EnvFrom:      runner.Spec.EnvFrom,
-			Args:         runner.Spec.Args,
-			Command:      runner.Spec.Command,
-			Resources:    runner.Spec.Resources,
-			VolumeMounts: runner.Spec.Mounts,
-			SecurityContext: &corev1.SecurityContext{
-				AllowPrivilegeEscalation: new(false),
-				ReadOnlyRootFilesystem:   new(true),
-				Capabilities: &corev1.Capabilities{
-					Drop: []corev1.Capability{"ALL"},
-				},
-			},
+			Name:            "runner",
+			Image:           runner.Spec.Image,
+			Env:             runner.Spec.Env,
+			EnvFrom:         runner.Spec.EnvFrom,
+			Args:            runner.Spec.Args,
+			Command:         runner.Spec.Command,
+			Resources:       runner.Spec.Resources,
+			VolumeMounts:    runner.Spec.Mounts,
+			SecurityContext: sc,
 		},
 	}
 

@@ -109,6 +109,13 @@ type RunnerSpec struct {
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 
+	// SecurityContext defines the container-level security context for the runner.
+	// When not set, secure defaults are applied (non-root, no privilege escalation,
+	// all capabilities dropped). Set this to override the defaults for images that
+	// require specific privileges or a writable root filesystem.
+	// +optional
+	SecurityContext *corev1.SecurityContext `json:"securityContext,omitempty"`
+
 	// ServiceAccountName is the name of the Kubernetes service account to use
 	// for the runner's Pod. If not set, the default service account in the
 	// namespace is used.

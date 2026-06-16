@@ -490,3 +490,47 @@ Added `ServiceAccountName` to all three levels (Runner, WorkflowStep, JobSpec) f
 **Future considerations:**
 - No validation webhook exists yet — invalid volume specs will fail at Job creation time (K8s admission)
 - Chart CRDs must be manually synced when CRDs change (helm plugin is one-time scaffold; `make manifests` only updates `config/crd/bases/`)
+
+---
+
+### Session 19 — RBAC gaps & ReadOnlyRootFilesystem fix
+
+**Source:** Integration tester `findings.log` (v0.3.3 chart)
+
+| # | Finding | Fix |
+|---|---------|-----|
+| 1 | `namespaces` only `get` verb in workflow controller | Changed to `get;list;watch` (`workflow_controller.go:49`) |
+| 2 | `pods` missing `delete` verb in runner controller | Added `delete` to existing `get;list;watch` (`runner_controller.go:48`) |
+| 3 | `*/finalizers` missing | **Skipped** — operator relies on OwnerReferences + GC, not finalizers (Session 4 decision) |
+| 4 | Workflow `steps` → `jobs[].steps[]` restructure | Backward compatible; no action needed |
+| 5 | `ReadOnlyRootFilesystem: true` breaks many images | Added `RunnerSpec.SecurityContext` field for full container SC override. Defaults no longer set `ReadOnlyRootFilesystem` or `RunAsUser`. |
+
+**Design change — SecurityContext:**
+
+Before: hardcoded container SC with `ReadOnlyRootFilesystem: true`, `AllowPrivilegeEscalation: false`, drop all caps.
+
+Now:
+- If `runner.Spec.SecurityContext` is set → use it as-is (full override)
+- If unset → apply secure defaults: `AllowPrivilegeEscalation: false`, drop all caps, `SeccompProfile: RuntimeDefault`. **No** `ReadOnlyRootFilesystem` or `RunAsUser` — these are opt-in.
+
+**Files modified:**
+- `api/v1alpha1/runner_types.go` — added `SecurityContext *corev1.SecurityContext`
+- `internal/controller/runner_controller.go` — dynamic SC in `buildJob`, RBAC `pods delete`
+- `internal/controller/workflow_controller.go` — RBAC `namespaces` fixed
+- `internal/controller/runner_controller_unit_test.go` — 2 new SC unit tests
+- `internal/controller/runner_controller_test.go` — SC test assertion updated
+- `config/rbac/role.yaml` — regenerated
+- `config/crd/bases/` — regenerated
+- `dist/chart/templates/crd/` — synced
+- `dist/install.yaml` — regenerated
+
+**Tests added:**
+| Test | What it verifies |
+|------|------------------|
+| `TestBuildJob_SecurityContext_default` | Default SC has `AllowPrivilegeEscalation=false`, drop all caps, **no** `ReadOnlyRootFilesystem` |
+| `TestBuildJob_SecurityContext_custom` | Custom SC replaces defaults entirely |
+
+**Verification:**
+- `make manifests generate build-installer` — OK
+- `make test` — 25/25 specs passing (9.9s, 59.5% coverage)
+- `go vet ./...` — OK
