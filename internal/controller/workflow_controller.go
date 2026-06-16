@@ -460,9 +460,12 @@ func (r *WorkflowReconciler) buildStepRunner(ctx context.Context, wf *runnersv1a
 	runnerName := fmt.Sprintf("%s-%s", wf.Name, sanitizeStepName(step.Name))
 
 	spec := runnersv1alpha1.RunnerSpec{
-		Command: step.Command,
-		Args:    step.Args,
-		Env:     step.Env,
+		Command:            step.Command,
+		Args:               step.Args,
+		Env:                step.Env,
+		Volumes:            step.Volumes,
+		Mounts:             step.Mounts,
+		ServiceAccountName: step.ServiceAccountName,
 	}
 
 	if step.Image != "" {
@@ -496,6 +499,15 @@ func (r *WorkflowReconciler) buildStepRunner(ctx context.Context, wf *runnersv1a
 			}
 			if step.GitRepo != nil {
 				spec.GitRepo = step.GitRepo
+			}
+			if step.Volumes != nil {
+				spec.Volumes = step.Volumes
+			}
+			if step.Mounts != nil {
+				spec.Mounts = step.Mounts
+			}
+			if step.ServiceAccountName != "" {
+				spec.ServiceAccountName = step.ServiceAccountName
 			}
 		} else {
 			stepRef := fmt.Sprintf("%s/%s", ns, step.RunnerRef.Name)
@@ -844,6 +856,16 @@ func (r *WorkflowReconciler) buildJobStepRunner(ctx context.Context, wf *runners
 
 	if job.GitRepo != nil && runner.Spec.GitRepo == nil {
 		runner.Spec.GitRepo = job.GitRepo
+	}
+
+	if job.ServiceAccountName != "" && runner.Spec.ServiceAccountName == "" {
+		runner.Spec.ServiceAccountName = job.ServiceAccountName
+	}
+	if len(job.Volumes) > 0 {
+		runner.Spec.Volumes = append(job.Volumes, runner.Spec.Volumes...)
+	}
+	if len(job.Mounts) > 0 {
+		runner.Spec.Mounts = append(job.Mounts, runner.Spec.Mounts...)
 	}
 
 	if job.SharedVolume != nil && job.SharedVolume.EmptyDir != nil {

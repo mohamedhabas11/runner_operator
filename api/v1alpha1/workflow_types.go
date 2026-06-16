@@ -117,6 +117,19 @@ type WorkflowStep struct {
 	// main container's working directory is set to the checkout path.
 	// +optional
 	GitRepo *GitRepo `json:"gitRepo,omitempty"`
+
+	// ServiceAccountName is the name of the Kubernetes service account to use
+	// for this step's runner Pod. Overrides the job-level service account if set.
+	// +optional
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+
+	// Volumes defines volumes available to the step.
+	// +optional
+	Volumes []corev1.Volume `json:"volumes,omitempty"`
+
+	// Mounts defines volume mounts for the step container.
+	// +optional
+	Mounts []corev1.VolumeMount `json:"mounts,omitempty"`
 }
 
 // JobPhase is a label for the current lifecycle phase of a workflow job.
@@ -175,6 +188,19 @@ type JobSpec struct {
 	// SharedVolume defines a volume shared between all steps in this job.
 	// +optional
 	SharedVolume *SharedVolume `json:"sharedVolume,omitempty"`
+
+	// ServiceAccountName is the name of the Kubernetes service account to use
+	// for all step runner Pods in this job. Individual steps can override this.
+	// +optional
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+
+	// Volumes defines volumes available to all steps in this job.
+	// +optional
+	Volumes []corev1.Volume `json:"volumes,omitempty"`
+
+	// Mounts defines volume mounts for all steps in this job.
+	// +optional
+	Mounts []corev1.VolumeMount `json:"mounts,omitempty"`
 
 	// Steps defines the ordered steps of the job.
 	// +listType=map

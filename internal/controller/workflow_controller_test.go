@@ -114,6 +114,75 @@ var _ = Describe("Workflow Controller", func() {
 			}
 		})
 
+		It("should propagate ServiceAccountName from step to Runner spec", func() {
+			name := "test-wf-sa-step"
+			nsName := types.NamespacedName{Name: name, Namespace: "default"}
+
+			wf := &runnersv1alpha1.Workflow{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: "default",
+				},
+				Spec: runnersv1alpha1.WorkflowSpec{
+					Steps: []runnersv1alpha1.WorkflowStep{
+						{
+							Name:               "step-with-sa",
+							Image:              "busybox:latest",
+							ServiceAccountName: "step-sa",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, wf)).To(Succeed())
+			defer cleanupWorkflow(ctx, name)
+
+			r := &WorkflowReconciler{
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(10),
+			}
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: nsName})
+			Expect(err).NotTo(HaveOccurred())
+
+			runner := &runnersv1alpha1.Runner{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name + "-step-with-sa", Namespace: "default"}, runner)).To(Succeed())
+			Expect(runner.Spec.ServiceAccountName).To(Equal("step-sa"))
+		})
+
+		It("should use empty SA when step has no ServiceAccountName", func() {
+			name := "test-wf-sa-empty"
+			nsName := types.NamespacedName{Name: name, Namespace: "default"}
+
+			wf := &runnersv1alpha1.Workflow{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: "default",
+				},
+				Spec: runnersv1alpha1.WorkflowSpec{
+					Steps: []runnersv1alpha1.WorkflowStep{
+						{
+							Name:  "step-no-sa",
+							Image: "busybox:latest",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, wf)).To(Succeed())
+			defer cleanupWorkflow(ctx, name)
+
+			r := &WorkflowReconciler{
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(10),
+			}
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: nsName})
+			Expect(err).NotTo(HaveOccurred())
+
+			runner := &runnersv1alpha1.Runner{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name + "-step-no-sa", Namespace: "default"}, runner)).To(Succeed())
+			Expect(runner.Spec.ServiceAccountName).To(BeEmpty())
+		})
+
 		It("should respect dependsOn ordering by creating Runner only after dependency completes", func() {
 			name := "test-wf-deps"
 			nsName := types.NamespacedName{Name: name, Namespace: "default"}
@@ -230,6 +299,125 @@ var _ = Describe("Workflow Controller", func() {
 				}
 			}
 			Expect(found).To(BeTrue())
+		})
+	})
+
+	Context("ServiceAccountName propagation in job-based workflows", func() {
+		It("should use job-level SA when step has no SA", func() {
+			name := "test-wf-job-sa-default"
+			nsName := types.NamespacedName{Name: name, Namespace: "default"}
+
+			wf := &runnersv1alpha1.Workflow{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: "default",
+				},
+				Spec: runnersv1alpha1.WorkflowSpec{
+					Jobs: []runnersv1alpha1.JobSpec{
+						{
+							Name:               "job-a",
+							ServiceAccountName: "job-sa",
+							Steps: []runnersv1alpha1.WorkflowStep{
+								{Name: "step-1", Image: "busybox:latest"},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, wf)).To(Succeed())
+			defer cleanupWorkflow(ctx, name)
+
+			r := &WorkflowReconciler{
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(10),
+			}
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: nsName})
+			Expect(err).NotTo(HaveOccurred())
+
+			runner := &runnersv1alpha1.Runner{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name + "-step-1", Namespace: "default"}, runner)).To(Succeed())
+			Expect(runner.Spec.ServiceAccountName).To(Equal("job-sa"),
+				"step without SA should inherit job-level SA")
+		})
+
+		It("should prefer step-level SA over job-level SA", func() {
+			name := "test-wf-job-sa-override"
+			nsName := types.NamespacedName{Name: name, Namespace: "default"}
+
+			wf := &runnersv1alpha1.Workflow{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: "default",
+				},
+				Spec: runnersv1alpha1.WorkflowSpec{
+					Jobs: []runnersv1alpha1.JobSpec{
+						{
+							Name:               "job-a",
+							ServiceAccountName: "job-sa",
+							Steps: []runnersv1alpha1.WorkflowStep{
+								{
+									Name:               "step-1",
+									Image:              "busybox:latest",
+									ServiceAccountName: "step-sa",
+								},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, wf)).To(Succeed())
+			defer cleanupWorkflow(ctx, name)
+
+			r := &WorkflowReconciler{
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(10),
+			}
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: nsName})
+			Expect(err).NotTo(HaveOccurred())
+
+			runner := &runnersv1alpha1.Runner{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name + "-step-1", Namespace: "default"}, runner)).To(Succeed())
+			Expect(runner.Spec.ServiceAccountName).To(Equal("step-sa"),
+				"step-level SA should override job-level SA")
+		})
+
+		It("should use empty SA when neither job nor step specify one", func() {
+			name := "test-wf-job-sa-none"
+			nsName := types.NamespacedName{Name: name, Namespace: "default"}
+
+			wf := &runnersv1alpha1.Workflow{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: "default",
+				},
+				Spec: runnersv1alpha1.WorkflowSpec{
+					Jobs: []runnersv1alpha1.JobSpec{
+						{
+							Name: "job-a",
+							Steps: []runnersv1alpha1.WorkflowStep{
+								{Name: "step-1", Image: "busybox:latest"},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, wf)).To(Succeed())
+			defer cleanupWorkflow(ctx, name)
+
+			r := &WorkflowReconciler{
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(10),
+			}
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: nsName})
+			Expect(err).NotTo(HaveOccurred())
+
+			runner := &runnersv1alpha1.Runner{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name + "-step-1", Namespace: "default"}, runner)).To(Succeed())
+			Expect(runner.Spec.ServiceAccountName).To(BeEmpty(),
+				"should use empty SA when neither job nor step specify one")
 		})
 	})
 })

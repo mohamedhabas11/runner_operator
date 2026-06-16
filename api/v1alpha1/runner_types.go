@@ -109,6 +109,12 @@ type RunnerSpec struct {
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 
+	// ServiceAccountName is the name of the Kubernetes service account to use
+	// for the runner's Pod. If not set, the default service account in the
+	// namespace is used.
+	// +optional
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+
 	// GitRepo defines a Git repository to clone before executing the command.
 	// When set, an init container clones the repo into a shared volume and the
 	// main container's working directory is set to the checkout path.

@@ -229,6 +229,20 @@ func (in *JobSpec) DeepCopyInto(out *JobSpec) {
 		*out = new(SharedVolume)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.Volumes != nil {
+		in, out := &in.Volumes, &out.Volumes
+		*out = make([]v1.Volume, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+	if in.Mounts != nil {
+		in, out := &in.Mounts, &out.Mounts
+		*out = make([]v1.VolumeMount, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
 	if in.Steps != nil {
 		in, out := &in.Steps, &out.Steps
 		*out = make([]WorkflowStep, len(*in))
@@ -743,6 +757,20 @@ func (in *WorkflowStep) DeepCopyInto(out *WorkflowStep) {
 		in, out := &in.GitRepo, &out.GitRepo
 		*out = new(GitRepo)
 		(*in).DeepCopyInto(*out)
+	}
+	if in.Volumes != nil {
+		in, out := &in.Volumes, &out.Volumes
+		*out = make([]v1.Volume, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+	if in.Mounts != nil {
+		in, out := &in.Mounts, &out.Mounts
+		*out = make([]v1.VolumeMount, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
 	}
 }
 

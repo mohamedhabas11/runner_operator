@@ -71,6 +71,70 @@ var _ = Describe("Runner Controller", func() {
 	Context("Job creation", func() {
 		ctx := context.Background()
 
+		It("should use default SA when ServiceAccountName is empty", func() {
+			name := "test-runner-sa-default"
+			nsName := types.NamespacedName{Name: name, Namespace: "default"}
+
+			runner := &runnersv1alpha1.Runner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: "default",
+				},
+				Spec: runnersv1alpha1.RunnerSpec{
+					Image: "busybox:latest",
+					Args:  []string{"sh", "-c", "echo test"},
+				},
+			}
+			Expect(k8sClient.Create(ctx, runner)).To(Succeed())
+			defer cleanupRunner(ctx, name)
+
+			r := &RunnerReconciler{
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(10),
+			}
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: nsName})
+			Expect(err).NotTo(HaveOccurred())
+
+			job := &batchv1.Job{}
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: name + "-job", Namespace: "default"}, job)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(job.Spec.Template.Spec.ServiceAccountName).To(BeEmpty(),
+				"empty ServiceAccountName should use namespace default SA")
+		})
+
+		It("should propagate ServiceAccountName to the Job PodSpec", func() {
+			name := "test-runner-sa-custom"
+			nsName := types.NamespacedName{Name: name, Namespace: "default"}
+
+			runner := &runnersv1alpha1.Runner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: "default",
+				},
+				Spec: runnersv1alpha1.RunnerSpec{
+					Image:              "busybox:latest",
+					Args:               []string{"sh", "-c", "echo test"},
+					ServiceAccountName: "custom-sa",
+				},
+			}
+			Expect(k8sClient.Create(ctx, runner)).To(Succeed())
+			defer cleanupRunner(ctx, name)
+
+			r := &RunnerReconciler{
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(10),
+			}
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: nsName})
+			Expect(err).NotTo(HaveOccurred())
+
+			job := &batchv1.Job{}
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: name + "-job", Namespace: "default"}, job)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(job.Spec.Template.Spec.ServiceAccountName).To(Equal("custom-sa"))
+		})
+
 		It("should create a Job with the correct spec", func() {
 			name := "test-runner-job-spec"
 			nsName := types.NamespacedName{Name: name, Namespace: "default"}

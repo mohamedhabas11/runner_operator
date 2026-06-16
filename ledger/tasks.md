@@ -414,3 +414,79 @@ All open tasks are tracked in `ledger/review.md` organized by time horizon (Imme
 - [ ] **Tenant-aware metrics** — Add `namespace` label to all Prometheus metrics and Kubernetes Events for cost attribution.
 - [ ] **Network isolation** — Add namespace isolation network policies between tenant namespaces.
 - [ ] **Audit logging** — Log all cross-namespace operations with tenant identity for compliance.
+
+---
+
+### Session 18 — Volumes & Mounts for Workflow Steps and Jobs
+
+**Problem:** Workflow steps and jobs had no way to declare volumes or volume mounts, making the operator unsuitable for ephemeral CI runners that need access to docker sockets, PVCs, configmaps, secrets, etc.
+
+**Changes:**
+
+1. **`api/v1alpha1/workflow_types.go`** — Added fields:
+   - `WorkflowStep.Volumes []corev1.Volume` — step-level volumes
+   - `WorkflowStep.Mounts []corev1.VolumeMount` — step-level volume mounts
+   - `JobSpec.Volumes []corev1.Volume` — job-level volumes (applied to all steps in the job)
+   - `JobSpec.Mounts []corev1.VolumeMount` — job-level volume mounts
+
+2. **`internal/controller/workflow_controller.go`** — Propagation logic:
+   - `buildStepRunner`: Sets Volumes/Mounts from the step onto the Runner spec. When using `RunnerRef`, step-level Volumes/Mounts **override** the template (matching existing pattern for `Env`, `Command`, etc.)
+   - `buildJobStepRunner`: Merges job-level Volumes/Mounts into each step's Runner spec, **prepended** before step-level values (same merge direction as `Env`)
+
+**Volume resolution order (last wins on name conflict):**
+
+| Layer | Source | When |
+|-------|--------|------|
+| 1 | RunnerRef template volumes | `buildStepRunner` with `RunnerRef` |
+| 2 | Job-level volumes | `buildJobStepRunner` (prepended) |
+| 3 | Step-level volumes | `buildStepRunner` (set directly) |
+| 4 | SharedVolume volumes | `buildJobStepRunner` (appended) |
+| 5 | GitRepo volumes | `runner_controller.go` `buildJob` (appended) |
+
+**Session 18 addendum — ServiceAccountName field:**
+
+Added `ServiceAccountName` to all three levels (Runner, WorkflowStep, JobSpec) following Kubernetes best practice that workloads specify their service account.
+
+- `RunnerSpec.ServiceAccountName` → set as `PodSpec.ServiceAccountName` in `buildJob`
+- `WorkflowStep.ServiceAccountName` → set on Runner spec in `buildStepRunner`; overrides template when using `RunnerRef`
+- `JobSpec.ServiceAccountName` → used as default for steps when step-level is empty (same pattern as `GitRepo`)
+- Updated `dist/chart/templates/samples/workflow-volumes.yaml` to demonstrate job-level + step-level service accounts
+
+**Files modified:**
+- `api/v1alpha1/runner_types.go` — 1 new field
+- `api/v1alpha1/workflow_types.go` — 2 new fields (step + job)
+- `internal/controller/runner_controller.go` — wired to PodSpec
+- `internal/controller/workflow_controller.go` — wired in `buildStepRunner` and `buildJobStepRunner`
+- `dist/chart/templates/samples/workflow-volumes.yaml` — added SA examples
+- `config/crd/bases/` — regenerated
+- `api/v1alpha1/zz_generated.deepcopy.go` — regenerated
+- `dist/chart/templates/crd/` — 3 CRDs synced
+- `dist/install.yaml` — regenerated
+- `internal/controller/runner_controller_unit_test.go` — 3 new unit tests for SA default/custom/empty
+- `internal/controller/runner_controller_test.go` — 2 new integration tests for SA propagation to Job
+- `internal/controller/workflow_controller_test.go` — 5 new integration tests: step SA, job SA default, step-override-job, empty SA, job empty SA
+
+**Tests added — ServiceAccountName behavior:**
+
+| Level | Test | What it verifies |
+|-------|------|------------------|
+| Runner unit | `TestBuildJob_SA_default` | Empty SA → PodSpec SA empty (uses namespace default) |
+| Runner unit | `TestBuildJob_SA_custom` | Set SA → PodSpec SA matches |
+| Runner unit | `TestBuildJob_SA_emptyString` | Explicit "" → PodSpec SA empty |
+| Runner int | `default` | Reconcile without SA → Job PodSpec SA empty |
+| Runner int | `custom` | Reconcile with SA → Job PodSpec SA matches |
+| Workflow int | `step SA` | Step-level SA → Runner spec SA matches |
+| Workflow int | `empty step SA` | No step SA → Runner spec SA empty |
+| Workflow int | `job SA default` | Job-level SA, no step SA → Runner inherits job SA |
+| Workflow int | `step overrides job` | Job-level + step-level SA → Runner uses step SA |
+| Workflow int | `neither set` | No SA at any level → Runner spec SA empty |
+
+**Verification:**
+- `make manifests generate build-installer` — OK
+- `helm lint dist/chart` — 0 failures
+- `make test` — all passing (15.7s controller, coverage 51.7% → 59.4%)
+- `go vet ./...` — OK
+
+**Future considerations:**
+- No validation webhook exists yet — invalid volume specs will fail at Job creation time (K8s admission)
+- Chart CRDs must be manually synced when CRDs change (helm plugin is one-time scaffold; `make manifests` only updates `config/crd/bases/`)

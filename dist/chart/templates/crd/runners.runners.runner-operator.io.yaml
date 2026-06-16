@@ -1,11 +1,8 @@
-{{- if .Values.crd.enable }}
+---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    {{- if .Values.crd.keep }}
-    "helm.sh/resource-policy": keep
-    {{- end }}
     controller-gen.kubebuilder.io/version: v0.20.1
   name: runners.runners.runner-operator.io
 spec:
@@ -279,8 +276,9 @@ spec:
                       secretRef:
                         description: |-
                           SecretRef references a Secret containing Git credentials.
-                          For SSH auth: the secret must have key "ssh-privatekey".
-                          For HTTPS auth: the secret must have keys "username" and "password".
+                            - For ssh: key "ssh-privatekey" (required), "known_hosts" (optional)
+                            - For basicAuth: keys "username" and "password"
+                            - For token: key "token" (used as HTTPS password with empty username)
                         properties:
                           name:
                             default: ""
@@ -293,7 +291,23 @@ spec:
                             type: string
                         type: object
                         x-kubernetes-map-type: atomic
+                      type:
+                        description: |-
+                          Type selects the authentication method: "ssh", "basicAuth", or "token".
+                          When omitted, the controller auto-detects based on the URL scheme and
+                          the keys present in the referenced Secret.
+                        enum:
+                        - ssh
+                        - basicAuth
+                        - token
+                        type: string
+                    required:
+                    - secretRef
                     type: object
+                  image:
+                    description: Image overrides the default Git image (alpine/git:2.47.2)
+                      used for cloning.
+                    type: string
                   path:
                     description: |-
                       Path within the repository to use as the working directory.
@@ -306,12 +320,14 @@ spec:
                     type: string
                   url:
                     description: URL of the Git repository to clone (HTTPS or SSH).
+                    minLength: 1
                     type: string
                 required:
                 - url
                 type: object
               image:
                 description: Image is the Docker image to run.
+                minLength: 1
                 type: string
               mounts:
                 description: Mounts defines volume mounts for the runner container.
@@ -437,10 +453,17 @@ spec:
                       More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                     type: object
                 type: object
+              serviceAccountName:
+                description: |-
+                  ServiceAccountName is the name of the Kubernetes service account to use
+                  for the runner's Pod. If not set, the default service account in the
+                  namespace is used.
+                type: string
               timeoutAfter:
                 description: |-
                   TimeoutAfter defines the maximum duration before the runner is terminated.
                   Must be a valid Go duration string (e.g. "30m", "1h").
+                format: duration
                 type: string
               volumes:
                 description: Volumes defines volumes available to the runner.
@@ -1359,7 +1382,7 @@ spec:
                         A failure to resolve or pull the image during pod startup will block containers from starting and may add significant latency. Failures will be retried using normal volume backoff and will be reported on the pod reason and message.
                         The types of objects that may be mounted by this volume are defined by the container runtime implementation on a host machine and at minimum must include all valid types supported by the container image field.
                         The OCI object gets mounted in a single directory (spec.containers[*].volumeMounts.mountPath) by merging the manifest layers in the same way as for container images.
-                        The volume will be mounted read-only (ro) and non-executable files (noexec).
+                        The volume will be mounted read-only (ro).
                         Sub path mounts for containers are not supported (spec.containers[*].volumeMounts.subpath) before 1.33.
                         The field spec.securityContext.fsGroupChangePolicy has no effect on this volume type.
                       properties:
@@ -1531,8 +1554,7 @@ spec:
                       description: |-
                         portworxVolume represents a portworx volume attached and mounted on kubelets host machine.
                         Deprecated: PortworxVolume is deprecated. All operations for the in-tree portworxVolume type
-                        are redirected to the pxd.portworx.com CSI driver when the CSIMigrationPortworx feature-gate
-                        is on.
+                        are redirected to the pxd.portworx.com CSI driver.
                       properties:
                         fsType:
                           description: |-
@@ -2415,6 +2437,12 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              desiredSpecHash:
+                description: |-
+                  DesiredSpecHash is the hash of the spec that was deferred due to a running Job.
+                  Set when spec drift is deferred, cleared when the drift is resolved.
+                  Survives controller restarts so a deferred drift is not forgotten.
+                type: string
               observedGeneration:
                 description: ObservedGeneration is the last generation the controller
                   reconciled.
@@ -2422,6 +2450,12 @@ spec:
                 type: integer
               phase:
                 description: Phase is the current lifecycle phase.
+                enum:
+                - Pending
+                - Running
+                - Succeeded
+                - Failed
+                - Unknown
                 type: string
               resourceHash:
                 description: ResourceHash is a hash of the spec for drift detection.
@@ -2439,4 +2473,3 @@ spec:
     storage: true
     subresources:
       status: {}
-{{- end }}

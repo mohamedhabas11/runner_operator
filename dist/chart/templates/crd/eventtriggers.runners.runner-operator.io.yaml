@@ -1,11 +1,8 @@
-{{- if .Values.crd.enable }}
+---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    {{- if .Values.crd.keep }}
-    "helm.sh/resource-policy": keep
-    {{- end }}
     controller-gen.kubebuilder.io/version: v0.20.1
   name: eventtriggers.runners.runner-operator.io
 spec:
@@ -71,13 +68,23 @@ spec:
                     to a workflow environment variable.
                   properties:
                     default:
-                      description: Default value if the source field is missing from
-                        the payload.
+                      description: |-
+                        Default value if the source field is missing from the payload.
+                        Ignored when Required is true.
                       type: string
                     name:
                       description: Name of the environment variable to set on the
                         created workflow.
+                      minLength: 1
                       type: string
+                    required:
+                      description: |-
+                        Required marks this parameter as mandatory. When true and the source
+                        field is missing from the webhook payload, the EventTrigger sets a
+                        Ready=False condition and does not create a Workflow.
+                        When false (default), missing fields produce an empty env var and a
+                        warning-level log entry, and the Workflow is created.
+                      type: boolean
                     sanitize:
                       description: Sanitize strips shell metacharacters from the extracted
                         value.
@@ -85,6 +92,7 @@ spec:
                     source:
                       description: Source is a dot-path into the webhook JSON payload
                         (e.g. "$.ref").
+                      minLength: 1
                       type: string
                   required:
                   - name
@@ -122,20 +130,21 @@ spec:
                     description: |-
                       Path is the HTTP path for this webhook (e.g. "/webhooks/github-push").
                       Must be unique across all EventTriggers in the cluster.
+                    minLength: 1
+                    pattern: ^/
                     type: string
                   secretRef:
                     description: |-
                       SecretRef references a Secret containing the HMAC secret for payload validation.
-                      The secret must have key "hmac-secret".
+                      The secret must have key "hmac-secret". Defaults to the EventTrigger's namespace.
                     properties:
                       name:
-                        default: ""
-                        description: |-
-                          Name of the referent.
-                          This field is effectively required, but due to backwards compatibility is
-                          allowed to be empty. Instances of this type with an empty value here are
-                          almost certainly wrong.
-                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        description: name is unique within a namespace to reference
+                          a secret resource.
+                        type: string
+                      namespace:
+                        description: namespace defines the space within which the
+                          secret name must be unique.
                         type: string
                     type: object
                     x-kubernetes-map-type: atomic
@@ -148,6 +157,7 @@ spec:
                 properties:
                   name:
                     description: Name of the Workflow template CR to instantiate.
+                    minLength: 1
                     type: string
                   namespace:
                     description: Namespace of the Workflow template. Defaults to the
@@ -231,6 +241,7 @@ spec:
                 format: date-time
                 type: string
               registered:
+                default: false
                 description: Registered indicates whether the webhook route is currently
                   registered.
                 type: boolean
@@ -247,4 +258,3 @@ spec:
     storage: true
     subresources:
       status: {}
-{{- end }}

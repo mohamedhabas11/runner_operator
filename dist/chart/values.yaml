@@ -171,3 +171,9 @@ certManager:
 prometheus:
   enable: false
 
+## Sample Custom Resources
+## Installs example Runner and Workflow resources to demonstrate usage.
+##
+samples:
+  enable: false
+

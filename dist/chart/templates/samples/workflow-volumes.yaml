@@ -1,0 +1,48 @@
+{{- if .Values.samples.enable }}
+apiVersion: runners.runner-operator.io/v1alpha1
+kind: Workflow
+metadata:
+  name: {{ include "runner-operator.fullname" . }}-sample-workflow-volumes
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "runner-operator.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  timeout: "30m"
+  jobs:
+    - name: build
+      sharedVolume:
+        mountPath: "/workspace"
+        emptyDir: {}
+      steps:
+        - name: write
+          image: busybox:latest
+          command: ["sh", "-c"]
+          args: ["echo 'hello from ephemeral runner' > /workspace/artifact.txt"]
+        - name: read
+          image: busybox:latest
+          command: ["sh", "-c"]
+          args: ["cat /workspace/artifact.txt"]
+          dependsOn: ["write"]
+    - name: deploy
+      needs: ["build"]
+      serviceAccountName: ci-deployer
+      volumes:
+        - name: docker-socket
+          hostPath:
+            path: /var/run/docker.sock
+      mounts:
+        - name: docker-socket
+          mountPath: /var/run/docker.sock
+      steps:
+        - name: docker-info
+          image: docker:latest
+          command: ["docker"]
+          args: ["info"]
+        - name: helm-deploy
+          image: alpine/helm:latest
+          serviceAccountName: ci-deployer-helm
+          command: ["helm"]
+          args: ["upgrade", "--install", "my-app", "./chart"]
+{{- end }}
