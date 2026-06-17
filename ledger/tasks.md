@@ -629,7 +629,7 @@ for i, s := range wf.Status.StepStatuses {
 - `config/crd/bases/` — regenerated
 - `dist/chart/templates/crd/` — synced via `make sync-chart`
 - `dist/install.yaml` — regenerated
-- `dist/chart/Chart.yaml` — v0.3.6
+- `dist/chart/Chart.yaml` — v0.3.7
 
 **Verification:**
 - `make manifests generate fmt vet` — clean (no compile errors)

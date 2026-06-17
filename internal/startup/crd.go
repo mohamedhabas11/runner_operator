@@ -11,14 +11,14 @@ import (
 
 // crdInfo holds the expected CRD identity for version validation.
 type crdInfo struct {
-	name    string // full CRD name (e.g. "runners.runner-operator.io")
+	name    string // full CRD name (e.g. "runners.runners.runner-operator.io")
 	version string // expected served version (e.g. "v1alpha1")
 }
 
 var managedCRDs = []crdInfo{
-	{name: "runners.runner-operator.io", version: "v1alpha1"},
-	{name: "workflows.runner-operator.io", version: "v1alpha1"},
-	{name: "eventtriggers.runner-operator.io", version: "v1alpha1"},
+	{name: "runners.runners.runner-operator.io", version: "v1alpha1"},
+	{name: "workflows.runners.runner-operator.io", version: "v1alpha1"},
+	{name: "eventtriggers.runners.runner-operator.io", version: "v1alpha1"},
 }
 
 // CheckCRDs validates that the expected CRDs are installed with the correct

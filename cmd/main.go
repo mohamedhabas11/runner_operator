@@ -29,6 +29,7 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+        "sigs.k8s.io/controller-runtime/pkg/client"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -185,8 +186,10 @@ func main() {
 	}
 
 	setupLog.Info("Running pre-flight checks")
+        ctx := ctrl.SetupSignalHandler()
 
-	if missing, err := startup.CheckRBAC(ctrl.SetupSignalHandler(), mgr.GetClient()); err != nil {
+        directClient, _ := client.New(ctrl.GetConfigOrDie(), client.Options{Scheme: scheme})
+	if missing, err := startup.CheckRBAC(ctx, directClient); err != nil {
 		setupLog.Error(err, "RBAC pre-flight check failed")
 	} else if len(missing) > 0 {
 		setupLog.WithValues("count", len(missing)).Info("RBAC pre-flight check completed with warnings")
@@ -194,7 +197,7 @@ func main() {
 		setupLog.Info("RBAC pre-flight check passed")
 	}
 
-	if err := startup.CheckCRDs(ctrl.SetupSignalHandler(), mgr.GetClient()); err != nil {
+	if err := startup.CheckCRDs(ctx, directClient); err != nil {
 		setupLog.Error(err, "CRD pre-flight check failed")
 	}
 
@@ -246,7 +249,7 @@ func main() {
 	}
 
 	setupLog.Info("Starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "Failed to run manager")
 		os.Exit(1)
 	}

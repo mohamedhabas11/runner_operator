@@ -49,6 +49,7 @@ type RunnerReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;list;watch
 
 func (r *RunnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -258,7 +259,7 @@ func (r *RunnerReconciler) buildJob(runner *runnersv1alpha1.Runner, jobName, spe
 					InitContainers:     initContainers,
 					Containers:         containers,
 					Volumes:            volumes,
-					SecurityContext:    runnerSecurityContext(),
+					SecurityContext:    runnerSecurityContext(runner),
 					ServiceAccountName: runner.Spec.ServiceAccountName,
 				},
 			},
@@ -274,14 +275,26 @@ func (r *RunnerReconciler) buildJob(runner *runnersv1alpha1.Runner, jobName, spe
 	return job
 }
 
-func runnerSecurityContext() *corev1.PodSecurityContext {
-	return &corev1.PodSecurityContext{
-		RunAsNonRoot: new(true),
-		RunAsUser:    new(int64(1000)),
-		SeccompProfile: &corev1.SeccompProfile{
-			Type: corev1.SeccompProfileTypeRuntimeDefault,
-		},
-	}
+func runnerSecurityContext(runner *runnersv1alpha1.Runner) *corev1.PodSecurityContext {
+        sc := &corev1.PodSecurityContext{
+                RunAsNonRoot: new(true),
+                RunAsUser:    new(int64(1000)),
+                SeccompProfile: &corev1.SeccompProfile{
+                        Type: corev1.SeccompProfileTypeRuntimeDefault,
+                },
+        }
+
+        if runner.Spec.SecurityContext != nil {
+                if runner.Spec.SecurityContext.RunAsUser != nil && *runner.Spec.SecurityContext.RunAsUser == 0 {
+                        sc.RunAsNonRoot = new(false)
+                        sc.RunAsUser = new(int64(0))
+                }
+                if runner.Spec.SecurityContext.RunAsNonRoot != nil {
+                        sc.RunAsNonRoot = runner.Spec.SecurityContext.RunAsNonRoot
+                }
+        }
+
+        return sc
 }
 
 func (r *RunnerReconciler) updateStatusFromJob(ctx context.Context, runner *runnersv1alpha1.Runner, job *batchv1.Job) (ctrl.Result, error) {
